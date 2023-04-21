@@ -1,7 +1,14 @@
-import torch
+import sys
 
-from models.ibp import LinearBound, activation, IntervalBoundedTensor
+import numpy as np
+import torch
+from torch.utils.data import DataLoader
+
+from ibp import LinearBound, activation, IntervalBoundedTensor
 import torch.nn.functional as F
+
+sys.path.append("..")
+from utils import dataset
 
 FAKE_INF = 10
 EPS = 1e-8
@@ -123,33 +130,55 @@ class FNN(IBPModel):
 
 if __name__ == '__main__':
     torch.random.manual_seed(0)
-    batch_size = 100
-    dim_in = 2
+
+    train_data = dataset.Custom_Dataset("../data/german_train.csv", "credit_risk")
+    test_data = dataset.Custom_Dataset("../data/german_test.csv", "credit_risk")
+    # cast train_data.X to torch
+    train_data.X = torch.from_numpy(train_data.X).float()
+
+    batch_size = len(train_data) # to make it easy for now
+    dim_in = train_data.num_features
+
     model = FNN(dim_in, 2, [2, 4], epsilon=1e-2, bias_epsilon=1e-1)
-    x = torch.normal(0, 0.2, (batch_size, dim_in))
-    x[:batch_size // 2, 0] = x[:batch_size // 2, 0] + 2
-    cfx_x = x + torch.normal(0, 0.2, x.shape)
-    cfx_x[:batch_size // 2, :] = cfx_x[:batch_size // 2, :] - 1
-    cfx_x[batch_size // 2:, :] = cfx_x[batch_size // 2:, :] + 1
-    y = torch.ones((batch_size,))
-    y[:batch_size // 2] = 0
-    print(f"Centered at (2, 0) with label {y[0].long().item()}", x[:5])
-    print(f"CFX of the above points Centered at (1, -1) with label {(1- y[0]).long().item()}", cfx_x[:5])
-    print(f"Centered at (0, 0) with label {y[-1].long().item()}", x[-5:])
-    print(f"CFX of the above points Centered at (1, 1) with label {(1- y[-1]).long().item()}", cfx_x[-5:])
+
+    cfx_data = dataset.Custom_Dataset("../data/german_train.csv", "credit_risk")
+    cfx_data.X = cfx_data.X + np.random.normal(0, 0.2, cfx_data.X.shape)
+    cfx_data.X[:batch_size // 2, :] = cfx_data.X[:batch_size // 2, :] - 1
+    cfx_data.X[batch_size // 2:, :] = cfx_data.X[batch_size // 2:, :] + 1
+    # cast CFX data X to torch
+    cfx_data.X = torch.from_numpy(cfx_data.X).float()
+
+    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=False)
+    test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
+    
+    # x = torch.normal(0, 0.2, (batch_size, dim_in))
+    # x[:batch_size // 2, 0] = x[:batch_size // 2, 0] + 2
+    # cfx_x = x + torch.normal(0, 0.2, x.shape)
+    # cfx_x[:batch_size // 2, :] = cfx_x[:batch_size // 2, :] - 1
+    # cfx_x[batch_size // 2:, :] = cfx_x[batch_size // 2:, :] + 1
+
+    # y = torch.ones((batch_size,))
+    # y[:batch_size // 2] = 0
+    # print(f"Centered at (2, 0) with label {y[0].long().item()}", x[:5])
+    # print(f"CFX of the above points Centered at (1, -1) with label {(1- y[0]).long().item()}", cfx_x[:5])
+    # print(f"Centered at (0, 0) with label {y[-1].long().item()}", x[-5:])
+    # print(f"CFX of the above points Centered at (1, 1) with label {(1- y[-1]).long().item()}", cfx_x[-5:])
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
     for epoch in range(500):
-        optimizer.zero_grad()
-        loss = model.get_loss(x, cfx_x, y, 0.1)  # change lambda_ratio to 0.0 results in low CFX accuracy.
-        loss.backward()
-        optimizer.step()
-        if epoch % 100 == 0:
-            print(loss)
+        for batch, (X, y) in enumerate(train_dataloader):
+            optimizer.zero_grad()
+            loss = model.get_loss(X, cfx_data.X, y, 0.1)  # change lambda_ratio to 0.0 results in low CFX accuracy.
+            loss.backward()
+            optimizer.step()
+            if epoch % 100 == 0:
+                print(loss)
 
     model.eval()
     with torch.no_grad():
-        y_pred = model.forward_point_weights_bias(x).argmin(dim=-1)
-        print("Acc:", torch.mean((y_pred == y).float()).item())
-        cfx_y_pred = model.forward_point_weights_bias(cfx_x).argmin(dim=-1)
-        print("CFX Acc:", torch.mean((cfx_y_pred == (1 - y)).float()).item())
+        # eval on train for right now since we have those CFX
+        for X,y in train_dataloader:
+            y_pred = model.forward_point_weights_bias(X).argmin(dim=-1)
+            print("Acc:", torch.mean((y_pred == y).float()).item())
+            cfx_y_pred = model.forward_point_weights_bias(cfx_data.X).argmin(dim=-1)
+            print("CFX Acc:", torch.mean((cfx_y_pred == (1 - y)).float()).item())
