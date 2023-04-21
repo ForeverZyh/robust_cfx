@@ -1459,7 +1459,7 @@ def activation(func, x):
 
     Due to monotonicity, it suffices to evaluate the activation at the endpoints.
     """
-    if func not in (F.relu, torch.sigmoid, torch.tanh, torch.exp):
+    if func not in (F.relu, torch.sigmoid, torch.tanh, torch.exp, F.leaky_relu):
         raise ValueError(func)
     if isinstance(x, torch.Tensor):
         return func(x)
