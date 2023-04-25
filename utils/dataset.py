@@ -48,6 +48,7 @@ class Custom_Dataset(Dataset):
         data = pd.read_csv(data_file)
         self.y = data[label_col].values
         self.X = data.drop(columns=[label_col]).values
+        self.X = torch.from_numpy(self.X).float()
         self.num_features = self.X.shape[1]
 
         self.feature_types = feature_types
