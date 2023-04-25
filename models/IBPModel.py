@@ -9,6 +9,7 @@ import torch.nn.functional as F
 
 sys.path.append("..")
 from utils import dataset
+from utils import cfx
 
 FAKE_INF = 10
 EPS = 1e-8
@@ -34,7 +35,7 @@ class FNN(IBPModel):
         self.epsilon = epsilon
         self.bias_epsilon = bias_epsilon
         self.loss_func = torch.nn.BCELoss(reduce=False)
-
+        
     def forward_except_last(self, x):
         for i, num_hidden in enumerate(self.num_hiddens):
             x = getattr(self, 'fc{}'.format(i))(x)
@@ -48,6 +49,7 @@ class FNN(IBPModel):
         return self.fc_final.forward_point_weights_bias(x)
 
     def forward(self, x):
+        x = x.float() # necessary for Counterfactual generation to work
         x = self.forward_except_last(x)
         x = self.fc_final(x)
         return x
@@ -110,7 +112,7 @@ class FNN(IBPModel):
         is_real_cfx = torch.where(y == 0, cfx_output_lb <= 0, cfx_output_ub >= 0)
         return is_real_cfx, torch.where(y == 0, cfx_output_lb, cfx_output_ub)
 
-    def get_loss(self, x, cfx_x, y, lambda_ratio=1.0):
+    def get_loss(self, x, y, cfx_generator, lambda_ratio=1.0):
         ori_output = model.forward_point_weights_bias(x)
         # print(ori_output)
         ori_output = torch.sigmoid(ori_output[:, 0] - ori_output[:, 1])
@@ -118,6 +120,9 @@ class FNN(IBPModel):
         if lambda_ratio == 0:
             return ori_loss.mean()
         # print(ori_loss)
+
+        cfx_x = cfx_generator.run_wachter()
+
         is_real_cfx, cfx_output = self.get_diffs_binary(x, cfx_x, y)
         # print(is_real_cfx, cfx_output)
         cfx_output = torch.sigmoid(cfx_output)
@@ -128,28 +133,28 @@ class FNN(IBPModel):
         return (ori_loss + lambda_ratio * cfx_loss).mean()
 
 
+
 if __name__ == '__main__':
     torch.random.manual_seed(0)
-
     train_data = dataset.Custom_Dataset("../data/german_train.csv", "credit_risk")
     test_data = dataset.Custom_Dataset("../data/german_test.csv", "credit_risk")
     # cast train_data.X to torch
-    train_data.X = torch.from_numpy(train_data.X).float()
+   # train_data.X = torch.from_numpy(train_data.X).float()
 
     batch_size = len(train_data) # to make it easy for now
     dim_in = train_data.num_features
 
-    model = FNN(dim_in, 2, [2, 4], epsilon=1e-2, bias_epsilon=1e-1)
-
+    num_hiddens = [2,4]
+    model = FNN(dim_in, 2, num_hiddens, epsilon=1e-2, bias_epsilon=1e-1)
+    
     cfx_data = dataset.Custom_Dataset("../data/german_train.csv", "credit_risk")
-    cfx_data.X = cfx_data.X + np.random.normal(0, 0.2, cfx_data.X.shape)
+    cfx_data.X = cfx_data.X + torch.normal(0, 0.2, cfx_data.X.shape)
     cfx_data.X[:batch_size // 2, :] = cfx_data.X[:batch_size // 2, :] - 1
     cfx_data.X[batch_size // 2:, :] = cfx_data.X[batch_size // 2:, :] + 1
-    # cast CFX data X to torch
-    cfx_data.X = torch.from_numpy(cfx_data.X).float()
+    # # cast CFX data X to torch
+    # cfx_data.X = torch.from_numpy(cfx_data.X).float()
 
-    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=False)
-    test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
+
     
     # x = torch.normal(0, 0.2, (batch_size, dim_in))
     # x[:batch_size // 2, 0] = x[:batch_size // 2, 0] + 2
@@ -165,10 +170,19 @@ if __name__ == '__main__':
     # print(f"CFX of the above points Centered at (1, 1) with label {(1- y[-1]).long().item()}", cfx_x[-5:])
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
+    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=False)
+    test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
+
+    @torch.no_grad()
+    def predictor(X: np.ndarray) -> np.ndarray:
+        X = torch.as_tensor(X)
+        return model.forward(X).numpy()
+    
+    cfx_generator = cfx.CFX_Generator(predictor, train_data, num_layers = len(num_hiddens))
     for epoch in range(500):
         for batch, (X, y) in enumerate(train_dataloader):
             optimizer.zero_grad()
-            loss = model.get_loss(X, cfx_data.X, y, 0.1)  # change lambda_ratio to 0.0 results in low CFX accuracy.
+            loss = model.get_loss(X, y, cfx_generator, 0.1)  # change lambda_ratio to 0.0 results in low CFX accuracy.
             loss.backward()
             optimizer.step()
             if epoch % 100 == 0:

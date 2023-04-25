@@ -69,10 +69,36 @@ class IntervalBoundedTensor(BoundedTensor):
     @staticmethod
     def point(x):
         return IntervalBoundedTensor(x, x.clone(), x.clone())
+    
+    def dim(self):
+        '''
+        Returns the dimension of the point value. Necessary for counterfactual generation
+        '''
+        return self.val.dim()
 
+    def softmax(self, dim):
+        '''
+        Returns softmax of the point estimate. Necessary for counterfactual generation
+        '''
+        return self.val.softmax(dim)
+    
+    def argmax(self, axis = None):
+        '''
+        Returns argmax of the point estimate. Necessary for counterfactual generation
+        '''
+        return self.val.argmax(axis)
+
+    def max(self, axis):
+        '''
+        Returns max of the point estimate. Necessary for counterfactual generation
+        '''
+        return self.val.max(axis)
+    
     def float(self):
         return IntervalBoundedTensor(self.val.float(), self.lb.float(), self.ub.float())
 
+    def numpy(self):
+        return self.val.numpy()# IntervalBoundedTensor(self.val.numpy(), self.lb.numpy(), self.ub.numpy())
     ### Reimplementations of torch.Tensor methods
     def __neg__(self):
         return IntervalBoundedTensor(-self.val, -self.ub, -self.lb)
