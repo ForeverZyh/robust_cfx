@@ -3,6 +3,7 @@ import sys
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
+from sklearn.preprocessing import MinMaxScaler
 
 from ibp import LinearBound, activation, IntervalBoundedTensor
 import torch.nn.functional as F
@@ -113,6 +114,8 @@ class FNN(IBPModel):
         return is_real_cfx, torch.where(y == 0, cfx_output_lb, cfx_output_ub)
 
     def get_loss(self, x, y, cfx_generator, lambda_ratio=1.0):
+        # concert x to float32
+        x = x.float()
         ori_output = model.forward_point_weights_bias(x)
         # print(ori_output)
         ori_output = torch.sigmoid(ori_output[:, 0] - ori_output[:, 1])
@@ -138,13 +141,16 @@ if __name__ == '__main__':
     torch.random.manual_seed(0)
     train_data = dataset.Custom_Dataset("../data/german_train.csv", "credit_risk")
     test_data = dataset.Custom_Dataset("../data/german_test.csv", "credit_risk")
+    minmax = MinMaxScaler(clip=True)
+    train_data.X = minmax.fit_transform(train_data.X)
+    test_data.X = minmax.transform(test_data.X)
     # cast train_data.X to torch
    # train_data.X = torch.from_numpy(train_data.X).float()
 
-    batch_size = len(train_data) # to make it easy for now
+    batch_size = 10 # to make it easy for now
     dim_in = train_data.num_features
 
-    num_hiddens = [2,4]
+    num_hiddens = [10,10]
     model = FNN(dim_in, 2, num_hiddens, epsilon=1e-2, bias_epsilon=1e-1)
     
     cfx_data = dataset.Custom_Dataset("../data/german_train.csv", "credit_risk")
@@ -168,17 +174,43 @@ if __name__ == '__main__':
     # print(f"CFX of the above points Centered at (1, -1) with label {(1- y[0]).long().item()}", cfx_x[:5])
     # print(f"Centered at (0, 0) with label {y[-1].long().item()}", x[-5:])
     # print(f"CFX of the above points Centered at (1, 1) with label {(1- y[-1]).long().item()}", cfx_x[-5:])
-    model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
     train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=False)
     test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
 
     @torch.no_grad()
     def predictor(X: np.ndarray) -> np.ndarray:
-        X = torch.as_tensor(X)
-        return model.forward(X).numpy()
+        X = torch.as_tensor(X, dtype=torch.float32)
+        model.eval()
+        with torch.no_grad():
+            ret = model.forward_point_weights_bias(X)
+            ret = F.softmax(ret, dim=1)
+            ret = ret.cpu().numpy()
+            # print(ret)
+        model.train()
+        return ret
     
     cfx_generator = cfx.CFX_Generator(predictor, train_data, num_layers = len(num_hiddens))
+    # warm up
+    model.train()
+    for epoch in range(10):
+        for batch, (X, y) in enumerate(train_dataloader):
+            optimizer.zero_grad()
+            loss = model.get_loss(X, y, None, 0)
+            loss.backward()
+            optimizer.step()
+            # print(loss)
+
+        model.eval()
+        acc_cnt = 0
+        with torch.no_grad():
+            # eval on train for right now since we have those CFX
+            for X, y in test_dataloader:
+                y_pred = model.forward_point_weights_bias(X.float()).argmin(dim=-1)
+                acc_cnt += torch.sum(y_pred == y).item()
+        print("Acc:", acc_cnt / len(test_data))
+
+    model.train()
     for epoch in range(500):
         for batch, (X, y) in enumerate(train_dataloader):
             optimizer.zero_grad()
