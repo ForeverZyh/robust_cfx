@@ -55,31 +55,49 @@ class TestIBP(unittest.TestCase):
         batch_size = 10
         with torch.no_grad():
             for act in [F.relu, F.leaky_relu, torch.sigmoid, torch.tanh]:
-                # print(act)
+                print(act)
+                tighter_linear_to_crownibp = 0
+                tighter_real_linear_to_crownibp = 0
+                tighter_crownibp_to_ibp = 0
+                tighter_real_crownibp_to_ibp = 0
                 for rnd in range(200):
                     torch.random.manual_seed(rnd)
-                    model = FNN(in_dim, out_dim, [10, 10, 10], epsilon=eps, bias_epsilon=bias_eps, activation=act)
-                    x = (0.5 - torch.rand(batch_size, in_dim)) * 20
-                    cfx_x = x + (0.5 - torch.rand(x.shape)) * 10
-                    output = model.forward(x)
-                    y = output.val.argmax(dim=-1)
-                    output_diff = output[:, 1] + (- output[:, 0])
-                    cfx_output = model.forward(cfx_x)
-                    cfx_output_diff = cfx_output[:, 1] + (- cfx_output[:, 0])
-                    # change the sign according to y
-                    cfx_output_diff = cfx_output_diff * (2 * (0.5 - y))
-                    output_diff = output_diff * (2 * (0.5 - y))
-
-                    is_real_cfx = (output_diff.lb <= 0) & (cfx_output_diff.lb <= 0)
-                    cfx_output_diff_lb = cfx_output_diff.lb
-                    # print(is_real_cfx, cfx_output_diff_lb)
-
+                    model = FNN(in_dim, out_dim, [10, 10], epsilon=eps, bias_epsilon=bias_eps, activation=act)
+                    tmp_x = (0.5 - torch.rand(batch_size * 10, in_dim)) * 20
+                    tmp_y = model.forward_point_weights_bias(tmp_x).argmax(dim=-1)
+                    x = tmp_x[:batch_size]
+                    indices = torch.arange(batch_size, batch_size * 2)
+                    j = 0
+                    for i in range(batch_size * 2, batch_size * 10):
+                        if j >= len(indices):
+                            break
+                        if tmp_y[j] != tmp_y[i]:
+                            indices[j] = i
+                            j += 1
+                    y = tmp_y[:batch_size]
+                    cfx_x = tmp_x[indices]
+                    cfx_y = tmp_y[indices]
+                    # print(y, cfx_y)
+                    cal_is_real_cfx_crownibp, cal_cfx_output_crownibp = model.get_diffs_binary_crownibp(x, cfx_x, y)
+                    cal_cfx_output_crownibp_lb = cal_cfx_output_crownibp * (2 * (0.5 - y))
+                    cal_is_real_cfx_ibp, cal_cfx_output_ibp = model.get_diffs_binary_ibp(x, cfx_x, y)
+                    cal_cfx_output_ibp_lb = cal_cfx_output_ibp * (2 * (0.5 - y))
                     cal_is_real_cfx, cal_cfx_output = model.get_diffs_binary(x, cfx_x, y)
                     cal_cfx_output_lb = cal_cfx_output * (2 * (0.5 - y))
-                    # print(cal_is_real_cfx, cal_cfx_output_lb)
-                    # print(torch.max(cfx_output_diff_lb - cal_cfx_output_lb))
-                    self.assertTrue(torch.all(cfx_output_diff_lb <= cal_cfx_output_lb + TOLERANCE))
-                    self.assertTrue(torch.all(is_real_cfx | (~cal_is_real_cfx)))
+                    # print(cal_cfx_output_crownibp_lb, cal_cfx_output_lb)
+                    # print(cal_is_real_cfx_crownibp, cal_is_real_cfx)
+                    self.assertTrue(torch.all(cal_cfx_output_crownibp_lb <= cal_cfx_output_lb + TOLERANCE))
+                    self.assertTrue(torch.all(cal_cfx_output_ibp_lb <= cal_cfx_output_crownibp_lb + TOLERANCE))
+                    self.assertTrue(torch.all(cal_is_real_cfx_crownibp | (~cal_is_real_cfx)))
+                    self.assertTrue(torch.all(cal_is_real_cfx_ibp | (~cal_is_real_cfx_crownibp)))
+                    tighter_linear_to_crownibp += torch.sum(cal_cfx_output_lb - cal_cfx_output_crownibp_lb)
+                    tighter_crownibp_to_ibp += torch.sum(cal_cfx_output_crownibp_lb - cal_cfx_output_ibp_lb)
+                    tighter_real_linear_to_crownibp += torch.sum(cal_is_real_cfx_crownibp ^ cal_is_real_cfx)
+                    tighter_real_crownibp_to_ibp += torch.sum(cal_is_real_cfx_ibp ^ cal_is_real_cfx_crownibp)
+                print("tighter_linear_to_crownibp", tighter_linear_to_crownibp.item())
+                print("tighter_real_linear_to_crownibp", tighter_real_linear_to_crownibp.item())
+                print("tighter_crownibp_to_ibp", tighter_crownibp_to_ibp.item())
+                print("tighter_real_crownibp_to_ibp", tighter_real_crownibp_to_ibp.item())
 
     def test_fnn_diff_sound(self):
         eps = 1e-2

@@ -5,7 +5,7 @@ import torch
 from torch.utils.data import DataLoader
 from sklearn.preprocessing import MinMaxScaler
 
-from models.ibp import LinearBound, activation, IntervalBoundedTensor
+from models.ibp import LinearBound, activation, IntervalBoundedTensor, sum
 import torch.nn.functional as F
 
 from utils import dataset
@@ -65,8 +65,8 @@ class FNN(IBPModel):
             b = left - k * W_lb
             return k, b.sum(dim=-1) + b_
 
-        return get_k_and_b(left_end_points.lb, right_end_points.lb, b - self.bias_epsilon), \
-               get_k_and_b(left_end_points.ub, right_end_points.ub, b + self.bias_epsilon)
+        return get_k_and_b(left_end_points.lb, right_end_points.lb, b - self.bias_epsilon * 2), \
+               get_k_and_b(left_end_points.ub, right_end_points.ub, b + self.bias_epsilon * 2)
 
     @staticmethod
     def get_ub(k, k_1, b, b_1, w_lb, w_ub):
@@ -111,6 +111,28 @@ class FNN(IBPModel):
         # print(torch.any(alpha_k * alpha_k_1 < 0))
         is_real_cfx = torch.where(y == 0, cfx_output_lb <= 0, cfx_output_ub >= 0)
         return is_real_cfx, torch.where(y == 0, cfx_output_lb, cfx_output_ub)
+
+    def get_diffs_binary_crownibp(self, x, cfx_x, y):
+        embed_x = self.forward_except_last(x)
+        embed_cfx_x = self.forward_except_last(cfx_x)
+        y_final_weights = self.fc_final.linear.weight[1, :] - self.fc_final.linear.weight[0, :]
+        y_final_weights = IntervalBoundedTensor(y_final_weights, y_final_weights - 2 * self.epsilon,
+                                                y_final_weights + 2 * self.epsilon)
+        y_final_bias = self.fc_final.linear.bias[1] - self.fc_final.linear.bias[0]
+        y_final_bias = IntervalBoundedTensor(y_final_bias, y_final_bias - 2 * self.bias_epsilon,
+                                             y_final_bias + 2 * self.bias_epsilon)
+        output_x = sum(embed_x * y_final_weights, dim=-1) + y_final_bias
+        output_cfx = sum(embed_cfx_x * y_final_weights, dim=-1) + y_final_bias
+        is_real_cfx = torch.where(y == 0, output_x.lb <= 0, output_x.ub >= 0)
+        return is_real_cfx, torch.where(y == 0, output_cfx.lb, output_cfx.ub)
+
+    def get_diffs_binary_ibp(self, x, cfx_x, y):
+        output_x = self.forward(x)
+        output_cfx = self.forward(cfx_x)
+        output_cfx = output_cfx[:, 1] + (- output_cfx[:, 0])
+        is_real_cfx = torch.where(y == 0, output_x[:, 0].ub >= output_x[:, 1].lb,
+                                  output_x[:, 1].ub >= output_x[:, 0].lb)
+        return is_real_cfx, torch.where(y == 0, output_cfx.lb, output_cfx.ub)
 
     def get_loss(self, x, y, cfx_generator, lambda_ratio=1.0):
         # concert x to float32
