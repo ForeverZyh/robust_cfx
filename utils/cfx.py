@@ -3,6 +3,8 @@ import sys
 import os
 import copy
 
+import pickle 
+
 import numpy as np
 import torch
 from tqdm import tqdm
@@ -11,7 +13,10 @@ from utils.dataset import Datatype
 from alibi.explainers import Counterfactual
 import tensorflow as tf
 
-tf.compat.v1.disable_eager_execution()
+tf.compat.v1.disable_eager_execution() # required for functionality like placeholder
+# unfortunately causes a long error (warning) to print out everytime we run the function
+
+
 # parts of this file copied from https://github.com/junqi-jiang/robust-ce-inn/blob/main/expnns/utilexp.py
 class HiddenPrints:
     def __enter__(self):
@@ -145,14 +150,18 @@ class CFX_Generator:
     #     weights_0, biases_0 = build_inn_weights_biases(self.clf, self.num_layers, delta, nodes)
     #     self.inn_delta_0 = Inn(self.num_layers, delta, nodes, weights_0, biases_0)
 
-    def run_wachter(self, lam_init=0.0001, max_lam_steps=10, target_proba=0.6):
+    def run_wachter(self, lam_init=0.0001, max_lam_steps=10, target_proba=0.6, scaler = None, test_instances = None):
+        ''' 
+        This algorithm isn't great -- no logical constraints on feature values so finds non-integral
+        values for categorical features.
+        '''
+
+        if test_instances == None:
+            test_instances = self.test_instances
         CEs = []
+        is_CE = []
         data_point = np.array(self.X[1])
         shape = (1,) + data_point.shape[:]
-        # predict_fn = lambda x: self.model.predict_proba(x)
-        # cast X's datatype from float to double
-        # X_double = np.array(self.X, dtype=np.float64)
-        # predict_fn = lambda x: torch.nn.functional.softmax(self.model.forward(torch.tensor(x)))
         predict_fn = lambda x:self.model(x)
 
         max_iter = 10 # was 1000
@@ -166,23 +175,34 @@ class CFX_Generator:
                             decay=True, write_dir=None, debug=False)
         start_time = time.time()
         i=0
-        for x in self.test_instances:
+        output_shape = np.array(test_instances[0])
+        for x in test_instances:
             i+=1
             this_point = x
             with HiddenPrints():
                 explanation = cf.explain(this_point.reshape(1, -1))
             if explanation is None:
-                CEs.append(None)
+                CEs.append(this_point)
+                is_CE.append(0)
                 continue
             if explanation["cf"] is None:
-                CEs.append(None)
+                CEs.append(this_point)
+                is_CE.append(0)
                 continue
             proto_cf = explanation["cf"]["X"]
             proto_cf = proto_cf[0]
             this_cf = np.array(proto_cf)
             CEs.append(this_cf)
+            is_CE.append(1)
             if i%10 == 0:
                 print("done with ", i, "CEs")
         print("total computation time in s:", time.time() - start_time)
-        assert len(CEs) == len(self.test_instances)
-        return CEs
+        assert len(CEs) == len(test_instances)
+        # save CEs to file
+        with open('CEs.pkl', 'wb') as f:
+            if scaler is not None:
+                pickle.dump(scaler.inverse_transform(CEs), f)
+            else:
+                pickle.dump(CEs, f)
+
+        return torch.tensor(np.array(CEs).astype('float32')).squeeze(), torch.tensor(np.array(is_CE).astype('bool')).squeeze()

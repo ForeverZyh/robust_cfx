@@ -383,6 +383,7 @@ class LinearBound(nn.Module):
 
     def forward_point_weights_bias(self, x):
         if isinstance(x, torch.Tensor):
+            # print datatype of element of x -- e.g., float vs bool vs double
             return self.linear.forward(x)
         if isinstance(x, IntervalBoundedTensor):
             z = F.linear(x.val, self.linear.weight, self.linear.bias)
