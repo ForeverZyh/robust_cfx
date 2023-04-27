@@ -5,10 +5,9 @@ import torch
 from torch.utils.data import DataLoader
 from sklearn.preprocessing import MinMaxScaler
 
-from ibp import LinearBound, activation, IntervalBoundedTensor
+from models.ibp import LinearBound, activation, IntervalBoundedTensor
 import torch.nn.functional as F
 
-sys.path.append("..")
 from utils import dataset
 from utils import cfx
 
@@ -36,7 +35,7 @@ class FNN(IBPModel):
         self.epsilon = epsilon
         self.bias_epsilon = bias_epsilon
         self.loss_func = torch.nn.BCELoss(reduce=False)
-        
+
     def forward_except_last(self, x):
         for i, num_hidden in enumerate(self.num_hiddens):
             x = getattr(self, 'fc{}'.format(i))(x)
@@ -50,7 +49,7 @@ class FNN(IBPModel):
         return self.fc_final.forward_point_weights_bias(x)
 
     def forward(self, x):
-        x = x.float() # necessary for Counterfactual generation to work
+        x = x.float()  # necessary for Counterfactual generation to work
         x = self.forward_except_last(x)
         x = self.fc_final(x)
         return x
@@ -98,8 +97,8 @@ class FNN(IBPModel):
         # print(self.fc_final.forward_point_weights_bias(x.val))
         # print(self.fc_final.forward_point_weights_bias(cfx_x.val))
         # cfx_y = 1 - y
-        y_final_weights = self.fc_final.linear.weight[0, :] - self.fc_final.linear.weight[1, :]
-        y_final_bias = self.fc_final.linear.bias[0] - self.fc_final.linear.bias[1]
+        y_final_weights = self.fc_final.linear.weight[1, :] - self.fc_final.linear.weight[0, :]
+        y_final_bias = self.fc_final.linear.bias[1] - self.fc_final.linear.bias[0]
         (alpha_k, alpha_b), (beta_k, beta_b) = self.get_lb_ub_bound(x, y_final_weights, y_final_bias)
         y_final_weights_ub = y_final_weights + 2 * self.epsilon
         y_final_weights_lb = y_final_weights - 2 * self.epsilon
@@ -118,7 +117,7 @@ class FNN(IBPModel):
         x = x.float()
         ori_output = model.forward_point_weights_bias(x)
         # print(ori_output)
-        ori_output = torch.sigmoid(ori_output[:, 0] - ori_output[:, 1])
+        ori_output = torch.sigmoid(ori_output[:, 1] - ori_output[:, 0])
         ori_loss = self.loss_func(ori_output, y.float())
         if lambda_ratio == 0:
             return ori_loss.mean()
@@ -136,7 +135,6 @@ class FNN(IBPModel):
         return (ori_loss + lambda_ratio * cfx_loss).mean()
 
 
-
 if __name__ == '__main__':
     torch.random.manual_seed(0)
     train_data = dataset.Custom_Dataset("../data/german_train.csv", "credit_risk")
@@ -145,14 +143,15 @@ if __name__ == '__main__':
     train_data.X = minmax.fit_transform(train_data.X)
     test_data.X = minmax.transform(test_data.X)
     # cast train_data.X to torch
-   # train_data.X = torch.from_numpy(train_data.X).float()
+    # train_data.X = torch.from_numpy(train_data.X).float()
+    print(len(train_data))
 
-    batch_size = 10 # to make it easy for now
+    batch_size = 10  # to make it easy for now
     dim_in = train_data.num_features
 
-    num_hiddens = [10,10]
+    num_hiddens = [10, 10]
     model = FNN(dim_in, 2, num_hiddens, epsilon=1e-2, bias_epsilon=1e-1)
-    
+
     cfx_data = dataset.Custom_Dataset("../data/german_train.csv", "credit_risk")
     cfx_data.X = cfx_data.X + torch.normal(0, 0.2, cfx_data.X.shape)
     cfx_data.X[:batch_size // 2, :] = cfx_data.X[:batch_size // 2, :] - 1
@@ -160,8 +159,6 @@ if __name__ == '__main__':
     # # cast CFX data X to torch
     # cfx_data.X = torch.from_numpy(cfx_data.X).float()
 
-
-    
     # x = torch.normal(0, 0.2, (batch_size, dim_in))
     # x[:batch_size // 2, 0] = x[:batch_size // 2, 0] + 2
     # cfx_x = x + torch.normal(0, 0.2, x.shape)
@@ -178,6 +175,7 @@ if __name__ == '__main__':
     train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=False)
     test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
 
+
     @torch.no_grad()
     def predictor(X: np.ndarray) -> np.ndarray:
         X = torch.as_tensor(X, dtype=torch.float32)
@@ -189,8 +187,9 @@ if __name__ == '__main__':
             # print(ret)
         model.train()
         return ret
-    
-    cfx_generator = cfx.CFX_Generator(predictor, train_data, num_layers = len(num_hiddens))
+
+
+    cfx_generator = cfx.CFX_Generator(predictor, train_data, num_layers=len(num_hiddens))
     # warm up
     model.train()
     for epoch in range(10):
@@ -206,7 +205,7 @@ if __name__ == '__main__':
         with torch.no_grad():
             # eval on train for right now since we have those CFX
             for X, y in test_dataloader:
-                y_pred = model.forward_point_weights_bias(X.float()).argmin(dim=-1)
+                y_pred = model.forward_point_weights_bias(X.float()).argmax(dim=-1)
                 acc_cnt += torch.sum(y_pred == y).item()
         print("Acc:", acc_cnt / len(test_data))
 
@@ -223,8 +222,8 @@ if __name__ == '__main__':
     model.eval()
     with torch.no_grad():
         # eval on train for right now since we have those CFX
-        for X,y in train_dataloader:
-            y_pred = model.forward_point_weights_bias(X).argmin(dim=-1)
+        for X, y in train_dataloader:
+            y_pred = model.forward_point_weights_bias(X).argmax(dim=-1)
             print("Acc:", torch.mean((y_pred == y).float()).item())
-            cfx_y_pred = model.forward_point_weights_bias(cfx_data.X).argmin(dim=-1)
+            cfx_y_pred = model.forward_point_weights_bias(cfx_data.X).argmax(dim=-1)
             print("CFX Acc:", torch.mean((cfx_y_pred == (1 - y)).float()).item())

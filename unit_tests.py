@@ -62,10 +62,10 @@ class TestIBP(unittest.TestCase):
                     x = (0.5 - torch.rand(batch_size, in_dim)) * 20
                     cfx_x = x + (0.5 - torch.rand(x.shape)) * 10
                     output = model.forward(x)
-                    y = output.val.argmin(dim=-1)
-                    output_diff = output[:, 0] + (- output[:, 1])
+                    y = output.val.argmax(dim=-1)
+                    output_diff = output[:, 1] + (- output[:, 0])
                     cfx_output = model.forward(cfx_x)
-                    cfx_output_diff = cfx_output[:, 0] + (- cfx_output[:, 1])
+                    cfx_output_diff = cfx_output[:, 1] + (- cfx_output[:, 0])
                     # change the sign according to y
                     cfx_output_diff = cfx_output_diff * (2 * (0.5 - y))
                     output_diff = output_diff * (2 * (0.5 - y))
@@ -96,7 +96,7 @@ class TestIBP(unittest.TestCase):
                     x_ = (0.5 - torch.rand(batch_size, in_dim)) * 20
                     cfx_x_ = x_ + (0.5 - torch.rand(x_.shape)) * 10
                     output = model.forward_point_weights_bias(x_)
-                    y = output.argmin(dim=-1)
+                    y = output.argmax(dim=-1)
                     cal_is_real_cfx, cal_cfx_output = model.get_diffs_binary(x_, cfx_x_, y)
                     for _ in range(100):
                         x = x_
@@ -117,9 +117,9 @@ class TestIBP(unittest.TestCase):
                         bias = model.fc_final.linear.bias + (
                                 0.5 - torch.randint(0, 2, model.fc_final.linear.bias.shape)) * 2 * bias_eps
                         x = F.linear(x, weights, bias)
-                        x = x[:, 0] - x[:, 1]
+                        x = x[:, 1] - x[:, 0]
                         cfx_x = F.linear(cfx_x, weights, bias)
-                        cfx_x = cfx_x[:, 0] - cfx_x[:, 1]
+                        cfx_x = cfx_x[:, 1] - cfx_x[:, 0]
                         is_real_cfx = torch.where(y == 0, (x <= 0) & (cfx_x <= 0), (x >= 0) & (cfx_x >= 0))
                         is_sound = torch.where(y == 0, cal_cfx_output <= cfx_x + TOLERANCE,
                                                cfx_x - TOLERANCE <= cal_cfx_output)
