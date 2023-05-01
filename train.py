@@ -8,19 +8,11 @@ import torch.nn.functional as F
 from utils import dataset
 from utils import cfx
 from models.IBPModel import FNN
+from models.standard_model import Standard_FNN
 
-if __name__ == '__main__':
-    torch.random.manual_seed(0)
-    train_data = dataset.Custom_Dataset("data/german_train.csv", "credit_risk")
-    test_data = dataset.Custom_Dataset("data/german_test.csv", "credit_risk")
-    minmax = MinMaxScaler(clip=True)
-    train_data.X = minmax.fit_transform(train_data.X)
-    test_data.X = minmax.transform(test_data.X)
+import argparse
 
-    batch_size = 64
-    dim_in = train_data.num_features
-
-    num_hiddens = [10, 10]
+def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax):
     model = FNN(dim_in, 2, num_hiddens, epsilon=1e-2, bias_epsilon=1e-1)
 
     # cfx_data = dataset.Custom_Dataset("../data/german_train_lim.csv", "credit_risk")
@@ -105,3 +97,82 @@ if __name__ == '__main__':
             y_pred = model.forward_point_weights_bias(X).argmax(dim=-1)
             correct += torch.sum((y_pred == y).float()).item()
         print("Test accuracy: ", round(correct / total_samples, 4))
+
+    return model
+
+def train_standard(train_data, test_data, batch_size, dim_in, num_hiddens):
+    model = Standard_FNN(dim_in, 2, num_hiddens)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
+    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=False)
+    test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
+
+    @torch.no_grad()
+    def predictor(X: np.ndarray) -> np.ndarray:
+        X = torch.as_tensor(X, dtype=torch.float32)
+        with torch.no_grad():
+            ret = model.forward_point_weights_bias(X)
+            ret = F.softmax(ret, dim=1)
+            ret = ret.cpu().numpy()
+            # print(ret)
+        return ret
+    
+    model.train()
+    eval_freq = 10
+    for epoch in range(50):
+        total_loss = 0
+        for batch, (X, y) in enumerate(train_dataloader):
+            optimizer.zero_grad()
+            loss = model.get_loss(X, y)
+            total_loss += loss.item() * batch_size
+            loss.backward()
+            optimizer.step()
+
+        if epoch % eval_freq == 0:
+            print("Epoch", str(epoch), "loss:", total_loss / len(train_data))
+
+    model.eval()
+    with torch.no_grad():
+        total_samples, correct = 0, 0
+        for X, y in train_dataloader:
+            total_samples += len(X)
+            X = X.float()
+            y_pred = model.forward(X).argmax(dim=-1)
+            correct += torch.sum((y_pred == y).float()).item()
+        print("Train accuracy: ", round(correct / total_samples, 4))
+        total_samples, correct = 0, 0
+        for X, y in test_dataloader:
+            total_samples += len(X)
+            X = X.float()
+            y_pred = model.forward(X).argmax(dim=-1)
+            correct += torch.sum((y_pred == y).float()).item()
+        print("Test accuracy: ", round(correct / total_samples, 4))
+    return model
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('model_name', type=str, help="filename to save the model parameters to")
+    parser.add_argument('--model', type=str, default='IBP', help='IBP or standard')
+    args = parser.parse_args()
+
+    torch.random.manual_seed(0)
+    train_data = dataset.Custom_Dataset("data/german_train.csv", "credit_risk")
+    test_data = dataset.Custom_Dataset("data/german_test.csv", "credit_risk")
+    minmax = MinMaxScaler(clip=True)
+    train_data.X = minmax.fit_transform(train_data.X)
+    test_data.X = minmax.transform(test_data.X)
+
+    batch_size = 64
+    dim_in = train_data.num_features
+
+    num_hiddens = [10, 10]
+
+    if args.model == 'IBP':
+        model = train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax)
+    elif args.model == 'Standard':
+        model = train_standard(train_data, test_data, batch_size, dim_in, num_hiddens)
+    else:
+        raise ValueError('Invalid model type. Must be IBP or Standard')
+    
+    torch.save(model.state_dict(), 'models/' + args.model_name + '.pt')
+
+    
