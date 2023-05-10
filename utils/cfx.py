@@ -10,7 +10,7 @@ import torch
 from tqdm import tqdm
 
 from utils.dataset import Datatype
-from alibi.explainers import Counterfactual
+from alibi.explainers import Counterfactual, cfproto
 import tensorflow as tf
 
 tf.compat.v1.disable_eager_execution() # required for functionality like placeholder
@@ -50,16 +50,15 @@ class CFX_Generator:
     def __init__(self, model, dataset, gap=0.1, desired_class=1, num_test_instances=50, num_layers = 2):
         self.model = model
         self.num_layers = num_layers
+        self.dataset=dataset
         self.X = dataset.X
         self.y = dataset.y
-        self.feature_types = dataset.feature_types # maybe need this? not sure
         # self.X2 = X2
         # self.y2 = y2
         # self.columns = columns
         # self.ordinal_features = ordinal_features
         # self.discrete_features = discrete_features
         # self.continuous_features = continuous_features
-       # self.feat_var_map = feature_var_map
         # =1 (0) will select test instances with classification result 0 (1), =-1 will randomly select test instances
         self.desired_class = desired_class
         self.num_test_instances = num_test_instances
@@ -82,47 +81,6 @@ class CFX_Generator:
         self.build_test_instances()
         # self.build_inns()
 
-    # def build_dataset_obj(self):
-    #     self.dataset = Dataset(len(self.columns) - 1, self.clf.n_features_in_,
-    #                            build_dataset_feature_types(self.columns, self.ordinal_features, self.discrete_features,
-    #                                                        self.continuous_features), self.feat_var_map)
-
-    # def build_lof(self):
-    #     self.lof = LocalOutlierFactor(n_neighbors=20, novelty=True)
-    #     self.lof.fit(self.X1.values)
-
-    # def build_delta_min(self, gap):
-    #     wb_orig = get_flattened_weight_and_bias(self.clf)
-    #     for i in range(5):
-    #         np.random.seed(i)
-    #         idxs = np.random.choice(range(len(self.X2.values)), int(gap * len(self.X2.values)))
-    #         this_clf = copy.deepcopy(self.clf)
-    #         this_clf.partial_fit(self.X2.values[idxs], self.y2.values[idxs])
-    #         this_wb = get_flattened_weight_and_bias(this_clf)
-    #         this_delta = inf_norm(wb_orig, this_wb)
-    #         if this_delta >= self.delta_min:
-    #             self.delta_min = this_delta
-
-    # def build_Mplus_Mminus(self, gap):
-    #     self.build_delta_min(gap)
-    #     self.Mplus, self.Mminus = build_delta_extreme_shifted_models(self.clf, self.delta_min)
-
-    # def build_Mmax(self):
-    #     wb_orig = get_flattened_weight_and_bias(self.clf)
-    #     for i in range(5):
-    #         np.random.seed(i)
-    #         idxs = np.random.choice(range(len(self.X2.values)), int(0.99 * len(self.X2.values)))
-    #         this_clf = copy.deepcopy(self.clf)
-    #         this_clf.partial_fit(self.X2.values[idxs], self.y2.values[idxs])
-    #         this_wb = get_flattened_weight_and_bias(this_clf)
-    #         this_delta = inf_norm(wb_orig, this_wb)
-    #         if this_delta >= self.delta_max:
-    #             self.delta_max = this_delta
-    #             self.Mmax = this_clf
-
-    #     wb_orig = get_flattened_weight_and_bias(self.clf)
-    #     wb_max = get_flattened_weight_and_bias(self.Mmax)
-    #     self.delta_max = inf_norm(wb_max, wb_orig)
 
     def build_test_instances(self):
         ''' 
@@ -141,14 +99,58 @@ class CFX_Generator:
         # self.test_instances = self.X.values[random_idx]
         self.test_instances = self.X
 
-    # def build_inns(self):
-    #     delta = self.delta_min
-    #     nodes = build_inn_nodes(self.clf, self.num_layers)
-    #     weights, biases = build_inn_weights_biases(self.clf, self.num_layers, delta, nodes)
-    #     self.inn_delta_non_0 = Inn(self.num_layers, delta, nodes, weights, biases)
-    #     delta = 0
-    #     weights_0, biases_0 = build_inn_weights_biases(self.clf, self.num_layers, delta, nodes)
-    #     self.inn_delta_0 = Inn(self.num_layers, delta, nodes, weights_0, biases_0)
+    def run_proto(self, kap=0.1, theta=0., scaler = None, test_instances = None):
+        if test_instances == None:
+            test_instances = self.test_instances
+        data_point = np.array(self.X[1])
+        shape = (1,) + data_point.shape[:]
+        predict_fn = lambda x:self.model(x)
+        cat_var = {}
+        for idx in self.dataset.feature_types:
+            if self.dataset.feature_types[idx] != Datatype.CONTINUOUS_REAL:
+                for varidx in self.dataset.feat_var_map[idx]:
+                    cat_var[varidx] = 2
+        CEs, is_CE = [], []
+        start_time = time.time()
+        if len(self.discrete_features.keys()) == 0 and len(self.ordinal_features.keys()) == 0:
+            cf = cfproto.CounterFactualProto(predict_fn, shape, use_kdtree=True, theta=theta, kappa=kap,
+                                             feature_range=(np.array(self.X1.values.min(axis=0)).reshape(1, -1),
+                                                            np.array(self.X1.values.max(axis=0)).reshape(1, -1)))
+            cf.fit(self.X1.values, trustscore_kwargs=None)
+        else:
+            cf = cfproto.CounterFactualProto(predict_fn, shape, use_kdtree=True, theta=theta, feature_range=(
+                np.array(self.X1.min(axis=0)).reshape(1, -1), np.array(self.X1.max(axis=0)).reshape(1, -1)),
+                                             cat_vars=cat_var, kappa=kap,
+                                             ohe=False)
+            cf.fit(self.X1.values)
+        for i, x in tqdm(enumerate(self.test_instances)):
+            this_point = x
+            with HiddenPrints():
+                explanation = cf.explain(this_point.reshape(1, -1), Y=None, target_class=None, k=20, k_type='mean',
+                                         threshold=0., verbose=True, print_every=100, log_every=100)
+            if explanation is None:
+                CEs.append(this_point)
+                is_CE.append(0)
+                continue
+            if explanation["cf"] is None:
+                CEs.append(this_point)
+                is_CE.append(0)
+                continue
+            proto_cf = explanation["cf"]["X"]
+            proto_cf = proto_cf[0]
+            this_cf = np.array(proto_cf)
+            CEs.append(this_cf)
+            is_CE.append(1)
+        print("total computation time in s:", time.time() - start_time)
+        assert len(CEs) == len(test_instances)
+        # save CEs to file
+        with open('CEsProto.pkl', 'wb') as f:
+            if scaler is not None:
+                pickle.dump(scaler.inverse_transform(CEs), f)
+            else:
+                pickle.dump(CEs, f)
+
+        return torch.tensor(np.array(CEs).astype('float32')).squeeze(), torch.tensor(np.array(is_CE).astype('bool')).squeeze()    
 
     def run_wachter(self, lam_init=0.0001, max_lam_steps=10, target_proba=0.6, scaler = None, test_instances = None):
         ''' 
@@ -164,7 +166,7 @@ class CFX_Generator:
         shape = (1,) + data_point.shape[:]
         predict_fn = lambda x:self.model(x)
 
-        max_iter = 10 # was 1000
+        max_iter = 100 # was 1000
         lam_init = 0.001 # was 0.1
         eps = 0.1 # was 0.01
         tol = 0.1 # was 0.05
@@ -199,7 +201,7 @@ class CFX_Generator:
         print("total computation time in s:", time.time() - start_time)
         assert len(CEs) == len(test_instances)
         # save CEs to file
-        with open('CEs.pkl', 'wb') as f:
+        with open('CEsWachter.pkl', 'wb') as f:
             if scaler is not None:
                 pickle.dump(scaler.inverse_transform(CEs), f)
             else:

@@ -42,14 +42,15 @@ def main(args):
     cfx_generator = cfx.CFX_Generator(predictor, test_data, num_layers=len(num_hiddens))
 
     cfx_x, is_cfx = cfx_generator.run_wachter(scaler=minmax)
-
+    total_valid = sum(is_cfx)/len(is_cfx)
+    print("Found CFX for ",total_valid)
     # evaluate robustness first of the model on the test points
     # then evaluate the robustness of the counterfactual explanations
     is_real_cfx, cfx_output = model.get_diffs_binary(torch.tensor(test_data.X).float(), cfx_x, torch.tensor(test_data.y).bool())
     # if CFX was fake (i.e., None represented by [0]), then fix is_real_cfx to reflect this
     is_real_cfx = is_real_cfx & is_cfx
 
-    print(sum(is_real_cfx)/len(is_real_cfx))
+    print("Of CFX we found, these are robust: ",sum(is_real_cfx)/sum(is_cfx))
     # TO DO eventually eval how good (feasible) CFX are
     
 

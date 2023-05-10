@@ -12,7 +12,7 @@ from models.standard_model import Standard_FNN
 
 import argparse
 
-def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax):
+def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax, cfx_method):
     model = FNN(dim_in, 2, num_hiddens, epsilon=1e-2, bias_epsilon=1e-1)
 
     # cfx_data = dataset.Custom_Dataset("../data/german_train_lim.csv", "credit_risk")
@@ -43,7 +43,10 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax):
         model.eval()
         if epoch % cfx_generation_freq == cfx_generation_freq - 1:
             # generate CFX
-            cfx_x, is_cfx = cfx_generator.run_wachter(scaler=minmax)
+            if cfx_method == "proto":
+                cfx_x, is_cfx = cfx_generator.run_proto(scaler=minmax)
+            else:     
+                cfx_x, is_cfx = cfx_generator.run_wachter(scaler=minmax)
         model.train()
         total_loss = 0
         for batch, (X, y) in enumerate(train_dataloader):
@@ -152,14 +155,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('model_name', type=str, help="filename to save the model parameters to")
     parser.add_argument('--model', type=str, default='IBP', help='IBP or standard')
+    parser.add_argument('--cfx', type=str, default="wachter", help="wachter or proto")
     args = parser.parse_args()
 
     torch.random.manual_seed(0)
-    train_data = dataset.Custom_Dataset("data/german_train.csv", "credit_risk")
-    test_data = dataset.Custom_Dataset("data/german_test.csv", "credit_risk")
-    minmax = MinMaxScaler(clip=True)
-    train_data.X = minmax.fit_transform(train_data.X)
-    test_data.X = minmax.transform(test_data.X)
+    train_data, minmax = dataset.load_data("data/german_train.csv", "credit_risk", dataset.CREDIT_FEAT)
+    test_data, _ = dataset.load_data("data/german_test.csv", "credit_risk", dataset.CREDIT_FEAT, df_mm = minmax)
 
     batch_size = 64
     dim_in = train_data.num_features
@@ -167,7 +168,8 @@ if __name__ == '__main__':
     num_hiddens = [10, 10]
 
     if args.model == 'IBP':
-        model = train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax)
+        assert args.cfx in ['wachter', 'proto'], "Invalid CFX type"
+        model = train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax, args.cfx)
     elif args.model == 'Standard':
         model = train_standard(train_data, test_data, batch_size, dim_in, num_hiddens)
     else:
