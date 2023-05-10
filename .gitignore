@@ -1,0 +1,4 @@
+*.pkl
+.idea/*
+*pyc
+*pt
