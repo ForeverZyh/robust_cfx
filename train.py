@@ -159,8 +159,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     torch.random.manual_seed(0)
-    train_data, minmax = dataset.load_data("data/german_train.csv", "credit_risk", dataset.CREDIT_FEAT)
-    test_data, _ = dataset.load_data("data/german_test.csv", "credit_risk", dataset.CREDIT_FEAT, df_mm = minmax)
+    # train_data, minmax = dataset.load_data("data/german_train.csv", "credit_risk", dataset.CREDIT_FEAT)
+    # test_data, _ = dataset.load_data("data/german_test.csv", "credit_risk", dataset.CREDIT_FEAT, df_mm = minmax)
+    train_data, test_data, minmax = dataset.load_data_v1("data/german_train.csv", "data/german_test.csv", "credit_risk", dataset.CREDIT_FEAT)
+    
 
     batch_size = 64
     dim_in = train_data.num_features

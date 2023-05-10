@@ -186,3 +186,13 @@ def load_data(data, label, feature_types, df_mm = None):
 
 
     return df_enc, df_mm #, minmax
+
+def load_data_v1(data, data_test, label, feature_types):
+    train_data = Custom_Dataset(data, label, feature_types)
+    test_data = Custom_Dataset(data_test, label, feature_types)
+
+    minmax = MinMaxScaler(clip=True)
+    train_data.X = minmax.fit_transform(train_data.X)
+    test_data.X = minmax.transform(test_data.X)
+
+    return train_data, test_data, minmax
