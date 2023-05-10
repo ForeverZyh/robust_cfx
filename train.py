@@ -19,9 +19,8 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax, cf
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
     # NOTE: we need shuffle=False for CFX's to be in right order (or need to change how we generate CFX)
     # There should be dataset loader that returns index of the data point
-    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=False)
+    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
     test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
-
 
     @torch.no_grad()
     def predictor(X: np.ndarray) -> np.ndarray:
@@ -49,13 +48,13 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax, cf
                 cfx_x, is_cfx = cfx_generator.run_wachter(scaler=minmax)
         model.train()
         total_loss = 0
-        for batch, (X, y) in enumerate(train_dataloader):
+        for batch, (X, y, idx) in enumerate(train_dataloader):
             optimizer.zero_grad()
             if cfx_x is None:
                 loss = model.get_loss(X, y, None, None, 0)
             else:
-                this_cfx = cfx_x[batch * batch_size: (batch + 1) * batch_size]
-                this_is_cfx = is_cfx[batch * batch_size: (batch + 1) * batch_size]
+                this_cfx = cfx_x[idx]
+                this_is_cfx = is_cfx[idx]
                 loss = model.get_loss(X, y, this_cfx, this_is_cfx,
                                       0.1)  # changing lambda_ratio to 0.0 results in low CFX accuracy.
             total_loss += loss.item() * batch_size
@@ -67,24 +66,28 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax, cf
             model.eval()
             acc_cnt = 0
             with torch.no_grad():
-                for X, y in test_dataloader:
+                for X, y, _ in test_dataloader:
                     y_pred = model.forward_point_weights_bias(X.float()).argmax(dim=-1)
                     acc_cnt += torch.sum(y_pred == y).item()
             print("Epoch", str(epoch), "accuracy:", acc_cnt / len(test_data))
         model.eval()
         with torch.no_grad():
             # make sure CFX is valid
+            pre_valid = 0
+            post_valid = 0
             if cfx_x is not None:
-                for batch_id, (X, y) in enumerate(train_dataloader):
-                    i = batch_id * batch_size
-                    cfx_y = model.forward_point_weights_bias(cfx_x[i:i + batch_size]).argmax(dim=-1)
-                    is_cfx[i:i + batch_size] = is_cfx[i:i + batch_size] & (cfx_y == (1 - y)).bool()
+                for batch_id, (X, y, idx) in enumerate(train_dataloader):
+                    cfx_y = model.forward_point_weights_bias(cfx_x[idx]).argmax(dim=-1)
+                    pre_valid += torch.sum(is_cfx[idx]).item()
+                    is_cfx[idx] = is_cfx[idx] & (cfx_y == (1 - y)).bool()
+                    post_valid += torch.sum(is_cfx[idx]).item()
+                print("Epoch", str(epoch), "CFX valid:", pre_valid, post_valid)
 
     model.eval()
     with torch.no_grad():
         # eval on train for right now since we have those CFX
         total_samples, correct = 0, 0
-        for X, y in train_dataloader:
+        for X, y, _ in train_dataloader:
             total_samples += len(X)
             X = X.float()
             y_pred = model.forward_point_weights_bias(X).argmax(dim=-1)
@@ -94,7 +97,7 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax, cf
             # print("Train CFX Acc:", torch.mean((cfx_y_pred == (1 - y)).float()).item())
         print("Train accuracy: ", round(correct / total_samples, 4))
         total_samples, correct = 0, 0
-        for X, y in test_dataloader:
+        for X, y, _ in test_dataloader:
             total_samples += len(X)
             X = X.float()
             y_pred = model.forward_point_weights_bias(X).argmax(dim=-1)
@@ -103,10 +106,11 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax, cf
 
     return model
 
+
 def train_standard(train_data, test_data, batch_size, dim_in, num_hiddens):
     model = Standard_FNN(dim_in, 2, num_hiddens)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
-    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=False)
+    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
     test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
 
     @torch.no_grad()
@@ -123,7 +127,7 @@ def train_standard(train_data, test_data, batch_size, dim_in, num_hiddens):
     eval_freq = 10
     for epoch in range(50):
         total_loss = 0
-        for batch, (X, y) in enumerate(train_dataloader):
+        for batch, (X, y, _) in enumerate(train_dataloader):
             optimizer.zero_grad()
             loss = model.get_loss(X, y)
             total_loss += loss.item() * batch_size
@@ -136,14 +140,14 @@ def train_standard(train_data, test_data, batch_size, dim_in, num_hiddens):
     model.eval()
     with torch.no_grad():
         total_samples, correct = 0, 0
-        for X, y in train_dataloader:
+        for X, y, _ in train_dataloader:
             total_samples += len(X)
             X = X.float()
             y_pred = model.forward(X).argmax(dim=-1)
             correct += torch.sum((y_pred == y).float()).item()
         print("Train accuracy: ", round(correct / total_samples, 4))
         total_samples, correct = 0, 0
-        for X, y in test_dataloader:
+        for X, y, _ in test_dataloader:
             total_samples += len(X)
             X = X.float()
             y_pred = model.forward(X).argmax(dim=-1)
