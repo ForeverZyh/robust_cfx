@@ -106,10 +106,10 @@ class FNN(IBPModel):
 
         Return a tuple:
             - First entry: boolean tensor where each entry is 
-                - True the counterfactual is INVALID, i.e., if either
-                    - x's ground truth is 0 and CFX output's lower bound is less than 0
-                    - x's ground truth is 1 and CFX output's upper bound is greater than 0
+                - True the original prediction can be valid, i.e., the original prediction can be correct for any one 
+                of the parameter shifts
                 - False otherwise
+                Only used for unittests now
             - Second entry: real-valued tensor where each entry is 
                 - Lower bound of CFX output when x's ground truth is 0
                 - Upper bound of CFX output when x's ground truth is 1 
@@ -130,9 +130,9 @@ class FNN(IBPModel):
                                     y_final_weights_ub)
         # print(torch.any(beta_k * beta_k_1 < 0))
         # print(torch.any(alpha_k * alpha_k_1 < 0))
-        is_real_cfx = torch.where(y == 0, cfx_output_lb <= 0, cfx_output_ub >= 0)
+        can_ori_pred_valid = torch.where(y == 0, cfx_output_lb <= 0, cfx_output_ub >= 0)
 
-        return is_real_cfx, torch.where(y == 0, cfx_output_lb, cfx_output_ub)
+        return can_ori_pred_valid, torch.where(y == 0, cfx_output_lb, cfx_output_ub)
 
     def get_diffs_binary_crownibp(self, x, cfx_x, y):
         embed_x = self.forward_except_last(x)
@@ -145,16 +145,16 @@ class FNN(IBPModel):
                                              y_final_bias + 2 * self.bias_epsilon)
         output_x = sum(embed_x * y_final_weights, dim=-1) + y_final_bias
         output_cfx = sum(embed_cfx_x * y_final_weights, dim=-1) + y_final_bias
-        is_real_cfx = torch.where(y == 0, output_x.lb <= 0, output_x.ub >= 0)
-        return is_real_cfx, torch.where(y == 0, output_cfx.lb, output_cfx.ub)
+        can_ori_pred_valid = torch.where(y == 0, output_x.lb <= 0, output_x.ub >= 0)
+        return can_ori_pred_valid, torch.where(y == 0, output_cfx.lb, output_cfx.ub)
 
     def get_diffs_binary_ibp(self, x, cfx_x, y):
         output_x = self.forward(x)
         output_cfx = self.forward(cfx_x)
         output_cfx = output_cfx[:, 1] + (- output_cfx[:, 0])
-        is_real_cfx = torch.where(y == 0, output_x[:, 0].ub >= output_x[:, 1].lb,
+        can_ori_pred_valid = torch.where(y == 0, output_x[:, 0].ub >= output_x[:, 1].lb,
                                   output_x[:, 1].ub >= output_x[:, 0].lb)
-        return is_real_cfx, torch.where(y == 0, output_cfx.lb, output_cfx.ub)
+        return can_ori_pred_valid, torch.where(y == 0, output_cfx.lb, output_cfx.ub)
 
     def get_loss(self, x, y, cfx_x, is_cfx, lambda_ratio=1.0):
         '''
@@ -171,9 +171,9 @@ class FNN(IBPModel):
             return ori_loss.mean()
         # print(ori_loss)
 
-        is_real_cfx, cfx_output = self.get_diffs_binary(x, cfx_x, y)
-        # if CFX was fake (i.e., None represented by [0]), then fix is_real_cfx to reflect this
-        is_real_cfx = is_real_cfx & is_cfx
+        _, cfx_output = self.get_diffs_binary(x, cfx_x, y)
+        # if the cfx is valid and the original prediction is correct, then we use the cfx loss
+        is_real_cfx = is_cfx & torch.where(y == 0, ori_output < 0.5, ori_output >= 0.5)
         # print(is_real_cfx, cfx_output)
         cfx_output = torch.sigmoid(cfx_output)
         cfx_loss = self.loss_func(cfx_output, 1.0 - y)
