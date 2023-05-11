@@ -3,7 +3,7 @@ import sys
 import os
 import copy
 
-import pickle 
+import pickle
 
 import numpy as np
 import torch
@@ -13,7 +13,9 @@ from utils.dataset import Datatype
 from alibi.explainers import Counterfactual, cfproto
 import tensorflow as tf
 
-tf.compat.v1.disable_eager_execution() # required for functionality like placeholder
+tf.compat.v1.disable_eager_execution()  # required for functionality like placeholder
+
+
 # unfortunately causes a long error (warning) to print out everytime we run the function
 
 
@@ -27,10 +29,12 @@ class HiddenPrints:
         sys.stdout.close()
         sys.stdout = self._original_stdout
 
+
 def get_clf_num_layers(model):
     if isinstance(model, torch.nn.Sequential):
         return model.num_hiddens
     return model.hidden_layer_sizes
+
 
 def build_dataset_feature_types(columns, ordinal, discrete, continuous):
     feature_types = dict()
@@ -42,15 +46,17 @@ def build_dataset_feature_types(columns, ordinal, discrete, continuous):
         feature_types[columns.index(feat)] = Datatype.CONTINUOUS_REAL
     return feature_types
 
+
 class CFX_Generator:
     '''
         model - model
         dataset - dataset object containing X, y, feature_types
     '''
-    def __init__(self, model, dataset, gap=0.1, desired_class=1, num_test_instances=50, num_layers = 2):
+
+    def __init__(self, model, dataset, gap=0.1, desired_class=1, num_test_instances=50, num_layers=2):
         self.model = model
         self.num_layers = num_layers
-        self.dataset=dataset
+        self.dataset = dataset
         self.X = dataset.X
         self.y = dataset.y
         # self.X2 = X2
@@ -76,11 +82,10 @@ class CFX_Generator:
         # self.build_dataset_obj()
         # self.build_lof()
         # self.build_delta_min(gap)
-        #self.build_Mplus_Mminus(gap)
+        # self.build_Mplus_Mminus(gap)
         # self.build_Mmax()
         self.build_test_instances()
         # self.build_inns()
-
 
     def build_test_instances(self):
         ''' 
@@ -99,12 +104,12 @@ class CFX_Generator:
         # self.test_instances = self.X.values[random_idx]
         self.test_instances = self.X
 
-    def run_proto(self, kap=0.1, theta=0., scaler = None, test_instances = None):
+    def run_proto(self, kap=0.1, theta=0., scaler=None, test_instances=None):
         if test_instances == None:
             test_instances = self.test_instances
         data_point = np.array(self.X[1])
         shape = (1,) + data_point.shape[:]
-        predict_fn = lambda x:self.model(x)
+        predict_fn = lambda x: self.model(x)
         cat_var = {}
         for idx in self.dataset.feature_types:
             if self.dataset.feature_types[idx] != Datatype.CONTINUOUS_REAL:
@@ -150,9 +155,11 @@ class CFX_Generator:
             else:
                 pickle.dump(CEs, f)
 
-        return torch.tensor(np.array(CEs).astype('float32')).squeeze(), torch.tensor(np.array(is_CE).astype('bool')).squeeze()    
+        return torch.tensor(np.array(CEs).astype('float32')).squeeze(), torch.tensor(
+            np.array(is_CE).astype('bool')).squeeze()
 
-    def run_wachter(self, lam_init=0.0001, max_lam_steps=10, target_proba=0.6, scaler = None, test_instances = None):
+    def run_wachter(self, lam_init=0.0001, max_iter=100, max_lam_steps=10, target_proba=0.6, scaler=None,
+                    test_instances=None):
         ''' 
         This algorithm isn't great -- no logical constraints on feature values so finds non-integral
         values for categorical features.
@@ -164,22 +171,21 @@ class CFX_Generator:
         is_CE = []
         data_point = np.array(self.X[1])
         shape = (1,) + data_point.shape[:]
-        predict_fn = lambda x:self.model(x)
+        predict_fn = lambda x: self.model(x)
 
-        max_iter = 100 # was 1000
-        lam_init = 0.001 # was 0.1
-        eps = 0.1 # was 0.01
-        tol = 0.1 # was 0.05
+        lam_init = 0.001  # was 0.1
+        eps = 0.1  # was 0.01
+        tol = 0.1  # was 0.05
         cf = Counterfactual(predict_fn, shape, distance_fn='l1', target_proba=target_proba,
                             target_class='other', max_iter=max_iter, early_stop=50, lam_init=lam_init,
                             max_lam_steps=max_lam_steps, tol=tol, learning_rate_init=0.1,
                             feature_range=(0, 1), eps=eps, init='identity',
                             decay=True, write_dir=None, debug=False)
         start_time = time.time()
-        i=0
+        i = 0
         output_shape = np.array(test_instances[0])
         for x in test_instances:
-            i+=1
+            i += 1
             this_point = x
             with HiddenPrints():
                 explanation = cf.explain(this_point.reshape(1, -1))
@@ -196,7 +202,7 @@ class CFX_Generator:
             this_cf = np.array(proto_cf)
             CEs.append(this_cf)
             is_CE.append(1)
-            if i%10 == 0:
+            if i % 10 == 0:
                 print("done with ", i, "CEs")
         print("total computation time in s:", time.time() - start_time)
         assert len(CEs) == len(test_instances)
@@ -207,4 +213,5 @@ class CFX_Generator:
             else:
                 pickle.dump(CEs, f)
 
-        return torch.tensor(np.array(CEs).astype('float32')).squeeze(), torch.tensor(np.array(is_CE).astype('bool')).squeeze()
+        return torch.tensor(np.array(CEs).astype('float32')).squeeze(), torch.tensor(
+            np.array(is_CE).astype('bool')).squeeze()

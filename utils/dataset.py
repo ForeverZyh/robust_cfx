@@ -7,6 +7,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import MinMaxScaler
 
+
 # parts copied from https://github.com/junqi-jiang/robust-ce-inn/blob/main/dataset.py
 
 class Datatype(enum.Enum):
@@ -14,28 +15,29 @@ class Datatype(enum.Enum):
     ORDINAL = 1
     CONTINUOUS_REAL = 2
 
+
 CREDIT_FEAT = {
-        0: Datatype.DISCRETE, # checking account status
-        1: Datatype.ORDINAL, # duration
-        2: Datatype.DISCRETE, # credit history
-        3: Datatype.DISCRETE, # purpose
-        4: Datatype.CONTINUOUS_REAL, # credit amount
-        5: Datatype.DISCRETE, # savings
-        6: Datatype.DISCRETE, # employment
-        7: Datatype.ORDINAL, # installment rate
-        8: Datatype.DISCRETE, # personal status
-        9: Datatype.DISCRETE, # other debtors
-        10: Datatype.CONTINUOUS_REAL, # residence time
-        11: Datatype.DISCRETE, # property
-        12: Datatype.CONTINUOUS_REAL, # age
-        13: Datatype.DISCRETE, # other installment plans
-        14: Datatype.DISCRETE, # housing
-        15: Datatype.ORDINAL, # number of existing credits
-        16: Datatype.DISCRETE, # job
-        17: Datatype.ORDINAL, # number of people being liable
-        18: Datatype.DISCRETE, # telephone
-        19: Datatype.DISCRETE, # foreign worker
-    }
+    0: Datatype.DISCRETE,  # checking account status
+    1: Datatype.ORDINAL,  # duration
+    2: Datatype.DISCRETE,  # credit history
+    3: Datatype.DISCRETE,  # purpose
+    4: Datatype.CONTINUOUS_REAL,  # credit amount
+    5: Datatype.DISCRETE,  # savings
+    6: Datatype.DISCRETE,  # employment
+    7: Datatype.ORDINAL,  # installment rate
+    8: Datatype.DISCRETE,  # personal status
+    9: Datatype.DISCRETE,  # other debtors
+    10: Datatype.CONTINUOUS_REAL,  # residence time
+    11: Datatype.DISCRETE,  # property
+    12: Datatype.CONTINUOUS_REAL,  # age
+    13: Datatype.DISCRETE,  # other installment plans
+    14: Datatype.DISCRETE,  # housing
+    15: Datatype.ORDINAL,  # number of existing credits
+    16: Datatype.DISCRETE,  # job
+    17: Datatype.ORDINAL,  # number of people being liable
+    18: Datatype.DISCRETE,  # telephone
+    19: Datatype.DISCRETE,  # foreign worker
+}
 
 
 class Custom_Dataset(Dataset):
@@ -45,6 +47,7 @@ class Custom_Dataset(Dataset):
     - label_col is the name of the label column (if column names are provided), else its index
     - feature_types is a dictionary {(int) feature_index: (Datatype) feature_type}
     '''
+
     def __init__(self, data_file, label_col, feature_types):
         data = pd.read_csv(data_file)
         self.y = data[label_col].values
@@ -88,7 +91,7 @@ class Preprocessor:
         df_back = df[self.enc_cols[i + 1:]]
 
         enc = df.values[:, i]
-        enc = enc[~np.isnan(enc)]   # to avoid nan bugs from pd
+        enc = enc[~np.isnan(enc)]  # to avoid nan bugs from pd
         encoded = np.zeros((len(enc), feat_num))
 
         if type == "ordinal":
@@ -114,7 +117,7 @@ class Preprocessor:
         return encoded
 
     def encode_df(self, df):
-        self.enc_cols = self.columns # reset encoded cols
+        self.enc_cols = self.columns  # reset encoded cols
         df_copy = copy.copy(df)
         for (i, name) in enumerate(self.columns):
             if name in self.ordinal:
@@ -135,7 +138,7 @@ class Preprocessor:
         :param x: numpy array, shaped (x,)
         :return: x_copy: numpy array
         """
-        self.enc_cols = self.columns # reset encoded cols
+        self.enc_cols = self.columns  # reset encoded cols
         xpd = pd.DataFrame(data=x.reshape(1, -1), columns=self.columns)
         return self.encode_df(xpd)
 
@@ -146,7 +149,8 @@ class Preprocessor:
     def inverse_one(self, x):
         x_copy = copy.copy(x)
         return x_copy
-    
+
+
 def min_max_scale(df, continuous, min_vals=None, max_vals=None):
     ''' 
     Copied from https://github.com/junqi-jiang/robust-ce-inn : ~/expnns/preprocessor.py
@@ -165,7 +169,7 @@ def min_max_scale(df, continuous, min_vals=None, max_vals=None):
     return df_copy
 
 
-def load_data(data, label, feature_types, df_mm = None):
+def load_data(data, label, feature_types, df_mm=None):
     train_data = Custom_Dataset(data, label, feature_types)
 
     cont_features = [i for i in range(train_data.num_features) if feature_types[i] == Datatype.CONTINUOUS_REAL]
@@ -184,8 +188,8 @@ def load_data(data, label, feature_types, df_mm = None):
     # train_data.X = minmax.fit_transform(train_data.X)
     # test_data.X = minmax.transform(test_data.X)
 
+    return df_enc, df_mm  # , minmax
 
-    return df_enc, df_mm #, minmax
 
 def load_data_v1(data, data_test, label, feature_types):
     train_data = Custom_Dataset(data, label, feature_types)

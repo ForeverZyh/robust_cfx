@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from sklearn.preprocessing import MinMaxScaler
+import os
 
 import torch.nn.functional as F
 
@@ -11,6 +11,7 @@ from models.IBPModel import FNN
 from models.standard_model import Standard_FNN
 
 import argparse
+
 
 def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax, cfx_method):
     model = FNN(dim_in, 2, num_hiddens, epsilon=1e-2, bias_epsilon=1e-1)
@@ -32,7 +33,6 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax, cf
             # print(ret)
         return ret
 
-
     cfx_generator = cfx.CFX_Generator(predictor, train_data, num_layers=len(num_hiddens))
     cfx_generation_freq = 20
     eval_freq = 5
@@ -44,8 +44,8 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax, cf
             # generate CFX
             if cfx_method == "proto":
                 cfx_x, is_cfx = cfx_generator.run_proto(scaler=minmax)
-            else:     
-                cfx_x, is_cfx = cfx_generator.run_wachter(scaler=minmax)
+            else:
+                cfx_x, is_cfx = cfx_generator.run_wachter(scaler=minmax, max_iter=100)
         model.train()
         total_loss = 0
         for batch, (X, y, idx) in enumerate(train_dataloader):
@@ -57,7 +57,7 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax, cf
                 this_is_cfx = is_cfx[idx]
                 loss = model.get_loss(X, y, this_cfx, this_is_cfx,
                                       0.1)  # changing lambda_ratio to 0.0 results in low CFX accuracy.
-            total_loss += loss.item() * batch_size
+            total_loss += loss.item() * X.shape[0]
             loss.backward()
             optimizer.step()
 
@@ -122,7 +122,7 @@ def train_standard(train_data, test_data, batch_size, dim_in, num_hiddens):
             ret = ret.cpu().numpy()
             # print(ret)
         return ret
-    
+
     model.train()
     eval_freq = 10
     for epoch in range(50):
@@ -130,7 +130,7 @@ def train_standard(train_data, test_data, batch_size, dim_in, num_hiddens):
         for batch, (X, y, _) in enumerate(train_dataloader):
             optimizer.zero_grad()
             loss = model.get_loss(X, y)
-            total_loss += loss.item() * batch_size
+            total_loss += loss.item() * X.shape[0]
             loss.backward()
             optimizer.step()
 
@@ -155,18 +155,19 @@ def train_standard(train_data, test_data, batch_size, dim_in, num_hiddens):
         print("Test accuracy: ", round(correct / total_samples, 4))
     return model
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('model_name', type=str, help="filename to save the model parameters to")
-    parser.add_argument('--model', type=str, default='IBP', help='IBP or standard')
+    parser.add_argument('--model', type=str, default='IBP', help='IBP or Standard', choices=['IBP', 'Standard'])
     parser.add_argument('--cfx', type=str, default="wachter", help="wachter or proto")
     args = parser.parse_args()
 
     torch.random.manual_seed(0)
     # train_data, minmax = dataset.load_data("data/german_train.csv", "credit_risk", dataset.CREDIT_FEAT)
     # test_data, _ = dataset.load_data("data/german_test.csv", "credit_risk", dataset.CREDIT_FEAT, df_mm = minmax)
-    train_data, test_data, minmax = dataset.load_data_v1("data/german_train.csv", "data/german_test.csv", "credit_risk", dataset.CREDIT_FEAT)
-    
+    train_data, test_data, minmax = dataset.load_data_v1("data/german_train.csv", "data/german_test.csv", "credit_risk",
+                                                         dataset.CREDIT_FEAT)
 
     batch_size = 64
     dim_in = train_data.num_features
@@ -180,7 +181,5 @@ if __name__ == '__main__':
         model = train_standard(train_data, test_data, batch_size, dim_in, num_hiddens)
     else:
         raise ValueError('Invalid model type. Must be IBP or Standard')
-    
-    torch.save(model.state_dict(), 'models/' + args.model_name + '.pt')
 
-    
+    torch.save(model.state_dict(), os.path.join('models', args.model_name + '.pt'))
