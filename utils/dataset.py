@@ -10,33 +10,33 @@ from sklearn.preprocessing import MinMaxScaler
 
 # parts copied from https://github.com/junqi-jiang/robust-ce-inn/blob/main/dataset.py
 
-class Datatype(enum.Enum):
+class DataType(enum.Enum):
     DISCRETE = 0
     ORDINAL = 1
     CONTINUOUS_REAL = 2
 
 
 CREDIT_FEAT = {
-    0: Datatype.DISCRETE,  # checking account status
-    1: Datatype.ORDINAL,  # duration
-    2: Datatype.DISCRETE,  # credit history
-    3: Datatype.DISCRETE,  # purpose
-    4: Datatype.CONTINUOUS_REAL,  # credit amount
-    5: Datatype.DISCRETE,  # savings
-    6: Datatype.DISCRETE,  # employment
-    7: Datatype.ORDINAL,  # installment rate
-    8: Datatype.DISCRETE,  # personal status
-    9: Datatype.DISCRETE,  # other debtors
-    10: Datatype.CONTINUOUS_REAL,  # residence time
-    11: Datatype.DISCRETE,  # property
-    12: Datatype.CONTINUOUS_REAL,  # age
-    13: Datatype.DISCRETE,  # other installment plans
-    14: Datatype.DISCRETE,  # housing
-    15: Datatype.ORDINAL,  # number of existing credits
-    16: Datatype.DISCRETE,  # job
-    17: Datatype.ORDINAL,  # number of people being liable
-    18: Datatype.DISCRETE,  # telephone
-    19: Datatype.DISCRETE,  # foreign worker
+    0: DataType.DISCRETE,  # checking account status
+    1: DataType.ORDINAL,  # duration
+    2: DataType.DISCRETE,  # credit history
+    3: DataType.DISCRETE,  # purpose
+    4: DataType.CONTINUOUS_REAL,  # credit amount
+    5: DataType.DISCRETE,  # savings
+    6: DataType.DISCRETE,  # employment
+    7: DataType.ORDINAL,  # installment rate
+    8: DataType.DISCRETE,  # personal status
+    9: DataType.DISCRETE,  # other debtors
+    10: DataType.CONTINUOUS_REAL,  # residence time
+    11: DataType.DISCRETE,  # property
+    12: DataType.CONTINUOUS_REAL,  # age
+    13: DataType.DISCRETE,  # other installment plans
+    14: DataType.DISCRETE,  # housing
+    15: DataType.ORDINAL,  # number of existing credits
+    16: DataType.DISCRETE,  # job
+    17: DataType.ORDINAL,  # number of people being liable
+    18: DataType.DISCRETE,  # telephone
+    19: DataType.DISCRETE,  # foreign worker
 }
 
 
@@ -57,7 +57,7 @@ class Custom_Dataset(Dataset):
 
         self.feature_types = feature_types
         # feat var map is just a dictionary mapping x --> x for x in [0, 1, num_feat-1] since we use all features
-        self.feat_var_map = {i: i for i in range(self.num_features)}
+        self.feat_var_map = {i: [i] for i in range(self.num_features)}
 
     def __len__(self):
         return len(self.y)
@@ -172,9 +172,9 @@ def min_max_scale(df, continuous, min_vals=None, max_vals=None):
 def load_data(data, label, feature_types, df_mm=None):
     train_data = Custom_Dataset(data, label, feature_types)
 
-    cont_features = [i for i in range(train_data.num_features) if feature_types[i] == Datatype.CONTINUOUS_REAL]
-    ord_features = [i for i in range(train_data.num_features) if feature_types[i] == Datatype.ORDINAL]
-    disc_features = [i for i in range(train_data.num_features) if feature_types[i] == Datatype.DISCRETE]
+    cont_features = [i for i in range(train_data.num_features) if feature_types[i] == DataType.CONTINUOUS_REAL]
+    ord_features = [i for i in range(train_data.num_features) if feature_types[i] == DataType.ORDINAL]
+    disc_features = [i for i in range(train_data.num_features) if feature_types[i] == DataType.DISCRETE]
 
     min_vals = np.min(train_data.X[:, cont_features], axis=0)
     max_vals = np.max(train_data.X[:, cont_features], axis=0)

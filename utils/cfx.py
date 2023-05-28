@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from utils.dataset import Datatype
+from utils.dataset import DataType
 from alibi.explainers import Counterfactual, cfproto
 import tensorflow as tf
 
@@ -39,11 +39,11 @@ def get_clf_num_layers(model):
 def build_dataset_feature_types(columns, ordinal, discrete, continuous):
     feature_types = dict()
     for feat in ordinal.keys():
-        feature_types[columns.index(feat)] = Datatype.ORDINAL
+        feature_types[columns.index(feat)] = DataType.ORDINAL
     for feat in discrete.keys():
-        feature_types[columns.index(feat)] = Datatype.DISCRETE
+        feature_types[columns.index(feat)] = DataType.DISCRETE
     for feat in continuous:
-        feature_types[columns.index(feat)] = Datatype.CONTINUOUS_REAL
+        feature_types[columns.index(feat)] = DataType.CONTINUOUS_REAL
     return feature_types
 
 
@@ -112,7 +112,7 @@ class CFX_Generator:
         predict_fn = lambda x: self.model(x)
         cat_var = {}
         for idx in self.dataset.feature_types:
-            if self.dataset.feature_types[idx] != Datatype.CONTINUOUS_REAL:
+            if self.dataset.feature_types[idx] != DataType.CONTINUOUS_REAL:
                 for varidx in self.dataset.feat_var_map[idx]:
                     cat_var[varidx] = 2
         CEs, is_CE = [], []
@@ -184,7 +184,7 @@ class CFX_Generator:
         start_time = time.time()
         i = 0
         output_shape = np.array(test_instances[0])
-        for x in test_instances:
+        for x in tqdm(test_instances):
             i += 1
             this_point = x
             with HiddenPrints():
@@ -202,8 +202,6 @@ class CFX_Generator:
             this_cf = np.array(proto_cf)
             CEs.append(this_cf)
             is_CE.append(1)
-            if i % 10 == 0:
-                print("done with ", i, "CEs")
         print("total computation time in s:", time.time() - start_time)
         assert len(CEs) == len(test_instances)
         # save CEs to file
