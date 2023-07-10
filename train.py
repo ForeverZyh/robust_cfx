@@ -13,7 +13,7 @@ from models.standard_model import Standard_FNN
 import argparse
 
 
-def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax, cfx_method):
+def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, cfx_method, onehot):
     model = FNN(dim_in, 2, num_hiddens, epsilon=1e-2, bias_epsilon=1e-1)
 
     # cfx_data = dataset.Custom_Dataset("../data/german_train_lim.csv", "credit_risk")
@@ -29,8 +29,8 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax, cf
         with torch.no_grad():
             ret = model.forward_point_weights_bias(X)
             ret = F.softmax(ret, dim=1)
+            # so confused. proto expects softmax but somehow tensorflow wants one-dimensional output???
             ret = ret.cpu().numpy()
-            # print(ret)
         return ret
 
     cfx_generator = cfx.CFX_Generator(predictor, train_data, num_layers=len(num_hiddens))
@@ -43,9 +43,9 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax, cf
         if epoch % cfx_generation_freq == cfx_generation_freq - 1:
             # generate CFX
             if cfx_method == "proto":
-                cfx_x, is_cfx = cfx_generator.run_proto(scaler=minmax)
+                cfx_x, is_cfx = cfx_generator.run_proto(scaler=None, theta=100, onehot=onehot)
             else:
-                cfx_x, is_cfx = cfx_generator.run_wachter(scaler=minmax, max_iter=100)
+                cfx_x, is_cfx = cfx_generator.run_wachter(scaler=None, max_iter=100)
         model.train()
         total_loss = 0
         for batch, (X, y, idx) in enumerate(train_dataloader):
@@ -125,7 +125,7 @@ def train_standard(train_data, test_data, batch_size, dim_in, num_hiddens):
 
     model.train()
     eval_freq = 10
-    for epoch in range(50):
+    for epoch in range(10):
         total_loss = 0
         for batch, (X, y, _) in enumerate(train_dataloader):
             optimizer.zero_grad()
@@ -158,25 +158,27 @@ def train_standard(train_data, test_data, batch_size, dim_in, num_hiddens):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('model_name', type=str, help="filename to save the model parameters to")
+    parser.add_argument('model_name', type=str, help="filename to save the model parameters to (don't include models/ or .pt )")
     parser.add_argument('--model', type=str, default='IBP', help='IBP or Standard', choices=['IBP', 'Standard'])
     parser.add_argument('--cfx', type=str, default="wachter", help="wachter or proto")
+    parser.add_argument('--onehot', type=bool, default=False, help="whether to use onehot encoding on the data")
     args = parser.parse_args()
 
     torch.random.manual_seed(0)
-    # train_data, minmax = dataset.load_data("data/german_train.csv", "credit_risk", dataset.CREDIT_FEAT)
-    # test_data, _ = dataset.load_data("data/german_test.csv", "credit_risk", dataset.CREDIT_FEAT, df_mm = minmax)
-    train_data, test_data, minmax = dataset.load_data_v1("data/german_train.csv", "data/german_test.csv", "credit_risk",
-                                                         dataset.CREDIT_FEAT)
 
+    if args.onehot:
+        train_data, min_vals, max_vals = dataset.load_data("data/german_train.csv", "credit_risk", dataset.CREDIT_FEAT)
+        test_data, _, _ = dataset.load_data("data/german_test.csv", "credit_risk", dataset.CREDIT_FEAT, min_vals, max_vals)
+    else:
+        train_data, test_data, minmax = dataset.load_data_v1("data/german_train.csv", "data/german_test.csv", "credit_risk",
+                                            dataset.CREDIT_FEAT)
     batch_size = 64
     dim_in = train_data.num_features
 
     num_hiddens = [10, 10]
 
     if args.model == 'IBP':
-        assert args.cfx in ['wachter', 'proto'], "Invalid CFX type"
-        model = train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, minmax, args.cfx)
+        model = train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, args.cfx, args.onehot)
     elif args.model == 'Standard':
         model = train_standard(train_data, test_data, batch_size, dim_in, num_hiddens)
     else:

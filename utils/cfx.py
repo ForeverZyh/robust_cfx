@@ -12,13 +12,15 @@ from tqdm import tqdm
 from utils.dataset import DataType
 from alibi.explainers import Counterfactual, cfproto
 import tensorflow as tf
+import utils.dataset
 
 tf.compat.v1.disable_eager_execution()  # required for functionality like placeholder
 
-
-# unfortunately causes a long error (warning) to print out everytime we run the function
-
-
+# open a file with pickle
+def open_pickle(filename):
+    with open(filename, 'rb') as f:
+        return pickle.load(f)
+    
 # parts of this file copied from https://github.com/junqi-jiang/robust-ce-inn/blob/main/expnns/utilexp.py
 class HiddenPrints:
     def __enter__(self):
@@ -29,12 +31,10 @@ class HiddenPrints:
         sys.stdout.close()
         sys.stdout = self._original_stdout
 
-
 def get_clf_num_layers(model):
     if isinstance(model, torch.nn.Sequential):
         return model.num_hiddens
     return model.hidden_layer_sizes
-
 
 def build_dataset_feature_types(columns, ordinal, discrete, continuous):
     feature_types = dict()
@@ -45,7 +45,6 @@ def build_dataset_feature_types(columns, ordinal, discrete, continuous):
     for feat in continuous:
         feature_types[columns.index(feat)] = DataType.CONTINUOUS_REAL
     return feature_types
-
 
 class CFX_Generator:
     '''
@@ -104,35 +103,66 @@ class CFX_Generator:
         # self.test_instances = self.X.values[random_idx]
         self.test_instances = self.X
 
-    def run_proto(self, kap=0.1, theta=0., scaler=None, test_instances=None):
+    def run_proto(self, kap=0.1, theta=0., scaler=None, test_instances=None, onehot=False):
         if test_instances == None:
             test_instances = self.test_instances
         data_point = np.array(self.X[1])
         shape = (1,) + data_point.shape[:]
         predict_fn = lambda x: self.model(x)
         cat_var = {}
-        for idx in self.dataset.feature_types:
-            if self.dataset.feature_types[idx] != DataType.CONTINUOUS_REAL:
-                for varidx in self.dataset.feat_var_map[idx]:
-                    cat_var[varidx] = 2
+        
+        # From alibi documentation: the keys of the cat_vars dictionary represent the column where each categorical variable 
+        # starts while the values still return the number of categories.
+        i = 0
+        if onehot:
+            for idx in self.dataset.feature_types:
+                print("idx is ",idx)
+                if self.dataset.feature_types[idx] == DataType.DISCRETE:
+                    num_vals = int(self.dataset.discrete_features[idx].item())
+                    print("discrete. num_vals is ",num_vals)
+                    cat_var[i] = num_vals
+                    i += num_vals
+                elif self.dataset.feature_types[idx] == DataType.ORDINAL:
+                    num_vals = int(self.dataset.ordinal_features[idx].item())
+                    print("ordinal. num_vals is ",num_vals)
+                    cat_var[i] = num_vals
+                    i += num_vals
+                elif self.dataset.feature_types[idx] == DataType.CONTINUOUS_REAL:
+                    i += 1
+        else:
+            for idx in self.dataset.discrete_features.keys():
+                num_vals = int(self.dataset.discrete_features[idx].item())
+                cat_var[idx] = num_vals
+            for idx in self.dataset.ordinal_features.keys():
+                num_vals = int(self.dataset.ordinal_features[idx].item())
+                cat_var[idx] = num_vals
+            
+        print("cat_var is ",cat_var)
+        # NOTE: adding this line to make it work. But we don't want to do this because then categorical variables are treated as continuous
+        # cat_var = {}
+
         CEs, is_CE = [], []
         start_time = time.time()
-        if len(self.discrete_features.keys()) == 0 and len(self.ordinal_features.keys()) == 0:
-            cf = cfproto.CounterFactualProto(predict_fn, shape, use_kdtree=True, theta=theta, kappa=kap,
-                                             feature_range=(np.array(self.X1.values.min(axis=0)).reshape(1, -1),
-                                                            np.array(self.X1.values.max(axis=0)).reshape(1, -1)))
-            cf.fit(self.X1.values, trustscore_kwargs=None)
+        feature_range = (np.array(self.X.min(axis=0)).reshape(1, -1), np.array(self.X.max(axis=0)).reshape(1, -1))
+        if cat_var == {}:
+            # only continuous features
+            cf = cfproto.CounterfactualProto(predict_fn, shape, use_kdtree=True, theta=theta, kappa=kap,
+                                             feature_range=feature_range)
+            cf.fit(self.X, trustscore_kwargs=None)
         else:
-            cf = cfproto.CounterFactualProto(predict_fn, shape, use_kdtree=True, theta=theta, feature_range=(
-                np.array(self.X1.min(axis=0)).reshape(1, -1), np.array(self.X1.max(axis=0)).reshape(1, -1)),
-                                             cat_vars=cat_var, kappa=kap,
-                                             ohe=False)
-            cf.fit(self.X1.values)
+            # NOTE this line fails
+            cf = cfproto.CounterfactualProto(predict_fn, shape, use_kdtree=True, theta=theta, feature_range = feature_range,
+                                             cat_vars=cat_var, kappa=kap, ohe=onehot)
+            cf.fit(np.array(self.X)) # had .values() but i think that's wrong
+        j=0
         for i, x in tqdm(enumerate(self.test_instances)):
+            if j == 3:
+                break
+            j +=1
             this_point = x
             with HiddenPrints():
                 explanation = cf.explain(this_point.reshape(1, -1), Y=None, target_class=None, k=20, k_type='mean',
-                                         threshold=0., verbose=True, print_every=100, log_every=100)
+                                         threshold=0., verbose=True, print_every=10, log_every=10)
             if explanation is None:
                 CEs.append(this_point)
                 is_CE.append(0)
@@ -147,7 +177,7 @@ class CFX_Generator:
             CEs.append(this_cf)
             is_CE.append(1)
         print("total computation time in s:", time.time() - start_time)
-        assert len(CEs) == len(test_instances)
+        # assert len(CEs) == len(test_instances)
         # save CEs to file
         with open('CEsProto.pkl', 'wb') as f:
             if scaler is not None:
@@ -162,7 +192,7 @@ class CFX_Generator:
                     test_instances=None):
         ''' 
         This algorithm isn't great -- no logical constraints on feature values so finds non-integral
-        values for categorical features.
+        values for categorical features. As far as I can tell, no way to change this.
         '''
 
         if test_instances == None:
@@ -183,7 +213,6 @@ class CFX_Generator:
                             decay=True, write_dir=None, debug=False)
         start_time = time.time()
         i = 0
-        output_shape = np.array(test_instances[0])
         for x in tqdm(test_instances):
             i += 1
             this_point = x

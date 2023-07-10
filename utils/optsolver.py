@@ -29,6 +29,7 @@ class OptSolver:
         self.output_node_name = None
 
     def add_input_variable_constraints(self):
+        # TODO fix given different dfn of feat_var_map
         node_var = dict()
         for feat_idx in range(self.dataset.num_features):
             # cases by feature type, add different types of variables and constraints

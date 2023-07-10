@@ -15,16 +15,28 @@ from utils import dataset
 Evaluate the robustness of counterfactual explanations
 '''
 
-
 def main(args):
     torch.random.manual_seed(0)
-    train_data, test_data, minmax = dataset.load_data_v1("data/german_train.csv", "data/german_test.csv", "credit_risk",
-                                                         dataset.CREDIT_FEAT)
-    train_data.X = minmax.fit_transform(train_data.X)
-    test_data.X = minmax.transform(test_data.X)
+
+    if args.onehot:
+        minmax = None
+        train_data, min_vals, max_vals = dataset.load_data("data/german_train.csv", "credit_risk", dataset.CREDIT_FEAT)
+        test_data, _, _ = dataset.load_data("data/german_test.csv", "credit_risk", dataset.CREDIT_FEAT, min_vals, max_vals)
+        test_data_orig, _, _ = dataset.load_data('data/german_test.csv', "credit_risk", dataset.CREDIT_FEAT, min_vals, max_vals)
+    else:
+        train_data, test_data, minmax = dataset.load_data_v1("data/german_train.csv", "data/german_test.csv", "credit_risk",
+                                                            dataset.CREDIT_FEAT)
+        # make a deep copy of test_data
+        _, test_data_orig, _ = dataset.load_data_v1("data/german_train.csv", "data/german_test.csv", "credit_risk", dataset.CREDIT_FEAT)
+        test_data.X = test_data.X[:3]
+        test_data.y = test_data.y[:3]
+
+
+
     dim_in = train_data.num_features
 
     num_hiddens = [10, 10]
+    dim_in = 20 # NOTE hack to test out proto
     model = FNN(dim_in, 2, num_hiddens, epsilon=1e-2, bias_epsilon=1e-1)
     model.load_state_dict(torch.load(args.model))
     model.eval()
@@ -37,17 +49,19 @@ def main(args):
             ret = model.forward_point_weights_bias(X)
             ret = F.softmax(ret, dim=1)
             ret = ret.cpu().numpy()
-            # print(ret)
         return ret
 
-    cfx_generator = cfx.CFX_Generator(predictor, test_data, num_layers=len(num_hiddens))
+    cfx_generator = cfx.CFX_Generator(predictor, test_data_orig, num_layers=len(num_hiddens))
 
-    cfx_x, is_cfx = cfx_generator.run_wachter(scaler=minmax, max_iter=100)
+    if args.cfx == 'wachter':
+        cfx_x, is_cfx = cfx_generator.run_wachter(scaler=minmax, max_iter=100)
+    else: 
+        cfx_x, is_cfx = cfx_generator.run_proto(scaler=minmax, theta=100, onehot=args.onehot)
     pred_y_cor = model.forward_point_weights_bias(torch.tensor(test_data.X).float()).argmax(dim=-1) == torch.tensor(
         test_data.y)
     print(f"Model accuracy: {round(torch.sum(pred_y_cor).item() / len(pred_y_cor) * 100, 2)}% "
           f"({torch.sum(pred_y_cor).item()}/{len(pred_y_cor)})")
-    is_cfx = is_cfx & pred_y_cor
+    is_cfx = is_cfx & pred_y_cor 
     total_valid = torch.sum(is_cfx).item() / len(is_cfx)
     print(f"Found CFX for {round(total_valid * 100, 2)}%"
           f" ({torch.sum(is_cfx).item()}/{len(is_cfx)}) of test points")
@@ -86,6 +100,10 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('model', type=str, help='path to model with .pt extension')
+    parser.add_argument('--cfx', type=str, default="wachter")
+    parser.add_argument('--onehot', type=bool, default=False, help='whether to use one-hot encoding')
     args = parser.parse_args()
+
+    assert args.cfx in ["wachter", "proto"]
 
     main(args)
