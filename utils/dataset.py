@@ -103,7 +103,7 @@ class Custom_Dataset(Dataset):
         self.y = data[label_col].values
 
         self.num_features = self.X.shape[1]
-        self.feature_names = X.columns
+        self.columns = X.columns
         self.feature_types = CREDIT_FEAT
         self.discrete_features = {}
         self.ordinal_features = {}
@@ -213,16 +213,13 @@ class Preprocessor:
         self.enc_cols = self.columns  # reset encoded cols
         df_copy = copy.copy(df)
         for (i, name) in enumerate(self.columns):
-            if name in self.ordinal:
-                print("HERE i is ",i, "name is ", name, "ordinal is ", self.ordinal[name])
-                df_copy, self.feature_var_map[i], column_names = self._encode_one_feature(df_copy, name, self.ordinal[name],
+            if i in self.ordinal.keys():
+                df_copy, self.feature_var_map[i], column_names = self._encode_one_feature(df_copy, name, int(self.ordinal[i].item()),
                                                                             "ordinal")
-            elif name in self.discrete:
-                print("HERE i is ",i, "name is ", name, "discrete is ", self.discrete[name])
-                df_copy, self.feature_var_map[i], column_names = self._encode_one_feature(df_copy, name, self.discrete[name],
+            elif i in self.discrete.keys():
+                df_copy, self.feature_var_map[i], column_names = self._encode_one_feature(df_copy, name, int(self.discrete[i].item()),
                                                                             "discrete")
             else:
-                print("HERE i is ",i, "name is ",name, "continnuous")
                 enccolslist = [x for x in self.enc_cols]
                 self.feature_var_map[i], column_names = [enccolslist.index(name)], self.enc_cols  # continuous
             self.enc_cols = column_names

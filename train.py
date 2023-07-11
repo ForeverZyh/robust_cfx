@@ -174,7 +174,6 @@ if __name__ == '__main__':
                                             dataset.CREDIT_FEAT)
     batch_size = 64
     dim_in = train_data.num_features
-
     num_hiddens = [10, 10]
 
     if args.model == 'IBP':
@@ -183,5 +182,6 @@ if __name__ == '__main__':
         model = train_standard(train_data, test_data, batch_size, dim_in, num_hiddens)
     else:
         raise ValueError('Invalid model type. Must be IBP or Standard')
+
 
     torch.save(model.state_dict(), os.path.join('models', args.model_name + '.pt'))

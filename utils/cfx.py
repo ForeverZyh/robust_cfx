@@ -116,15 +116,12 @@ class CFX_Generator:
         i = 0
         if onehot:
             for idx in self.dataset.feature_types:
-                print("idx is ",idx)
                 if self.dataset.feature_types[idx] == DataType.DISCRETE:
                     num_vals = int(self.dataset.discrete_features[idx].item())
-                    print("discrete. num_vals is ",num_vals)
                     cat_var[i] = num_vals
                     i += num_vals
                 elif self.dataset.feature_types[idx] == DataType.ORDINAL:
                     num_vals = int(self.dataset.ordinal_features[idx].item())
-                    print("ordinal. num_vals is ",num_vals)
                     cat_var[i] = num_vals
                     i += num_vals
                 elif self.dataset.feature_types[idx] == DataType.CONTINUOUS_REAL:
@@ -138,22 +135,26 @@ class CFX_Generator:
                 cat_var[idx] = num_vals
             
         print("cat_var is ",cat_var)
-        # NOTE: adding this line to make it work. But we don't want to do this because then categorical variables are treated as continuous
+        print("shape is ",shape)
+        # NOTE: can add this line to make it work. But we don't want to do this because then categorical variables are treated as continuous
         # cat_var = {}
 
         CEs, is_CE = [], []
         start_time = time.time()
         feature_range = (np.array(self.X.min(axis=0)).reshape(1, -1), np.array(self.X.max(axis=0)).reshape(1, -1))
+        # NOTE if we uncomment following line with OHE, fails on cf.fit() rather than cfproto.CounterfactualProto()
+        # feature_range = (np.zeros((1,20)), np.ones((1,20)))
         if cat_var == {}:
             # only continuous features
             cf = cfproto.CounterfactualProto(predict_fn, shape, use_kdtree=True, theta=theta, kappa=kap,
                                              feature_range=feature_range)
             cf.fit(self.X, trustscore_kwargs=None)
         else:
-            # NOTE this line fails
+            # NOTE this line fails if trying with or without OHE
             cf = cfproto.CounterfactualProto(predict_fn, shape, use_kdtree=True, theta=theta, feature_range = feature_range,
                                              cat_vars=cat_var, kappa=kap, ohe=onehot)
-            cf.fit(np.array(self.X)) # had .values() but i think that's wrong
+            # NOTE this line fails if trying with OHE and use a feature_range of dimension 20
+            cf.fit(np.array(self.X)) 
         j=0
         for i, x in tqdm(enumerate(self.test_instances)):
             if j == 3:

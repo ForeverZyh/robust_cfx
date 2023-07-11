@@ -34,9 +34,9 @@ def main(args):
 
 
     dim_in = train_data.num_features
-
+    
     num_hiddens = [10, 10]
-    dim_in = 20 # NOTE hack to test out proto
+
     model = FNN(dim_in, 2, num_hiddens, epsilon=1e-2, bias_epsilon=1e-1)
     model.load_state_dict(torch.load(args.model))
     model.eval()
