@@ -103,13 +103,15 @@ class CFX_Generator:
         # self.test_instances = self.X.values[random_idx]
         self.test_instances = self.X
 
-    def run_proto(self, kap=0.1, theta=0., scaler=None, test_instances=None, onehot=False):
+    def run_proto(self, kap=0, theta=10., scaler=None, test_instances=None, onehot=False, num_to_run = None):
         if test_instances == None:
             test_instances = self.test_instances
         data_point = np.array(self.X[1])
         shape = (1,) + data_point.shape[:]
         predict_fn = lambda x: self.model(x)
         cat_var = {}
+        if num_to_run == None:
+            num_to_run = len(test_instances)
         
         # From alibi documentation: the keys of the cat_vars dictionary represent the column where each categorical variable 
         # starts while the values still return the number of categories.
@@ -134,16 +136,14 @@ class CFX_Generator:
                 num_vals = int(self.dataset.ordinal_features[idx].item())
                 cat_var[idx] = num_vals
             
-        print("cat_var is ",cat_var)
-        print("shape is ",shape)
         # NOTE: can add this line to make it work. But we don't want to do this because then categorical variables are treated as continuous
         # cat_var = {}
 
         CEs, is_CE = [], []
         start_time = time.time()
-        feature_range = (np.array(self.X.min(axis=0)).reshape(1, -1), np.array(self.X.max(axis=0)).reshape(1, -1))
+        #feature_range = (np.array(self.X.min(axis=0)).reshape(1, -1), np.array(self.X.max(axis=0)).reshape(1, -1))
         # NOTE if we uncomment following line with OHE, fails on cf.fit() rather than cfproto.CounterfactualProto()
-        # feature_range = (np.zeros((1,20)), np.ones((1,20)))
+        feature_range = (np.zeros((1,20)), np.ones((1,20)))
         if cat_var == {}:
             # only continuous features
             cf = cfproto.CounterfactualProto(predict_fn, shape, use_kdtree=True, theta=theta, kappa=kap,
@@ -157,7 +157,7 @@ class CFX_Generator:
             cf.fit(np.array(self.X)) 
         j=0
         for i, x in tqdm(enumerate(self.test_instances)):
-            if j == 3:
+            if j == num_to_run:
                 break
             j +=1
             this_point = x
@@ -178,7 +178,7 @@ class CFX_Generator:
             CEs.append(this_cf)
             is_CE.append(1)
         print("total computation time in s:", time.time() - start_time)
-        # assert len(CEs) == len(test_instances)
+        assert len(CEs) == num_to_run
         # save CEs to file
         with open('CEsProto.pkl', 'wb') as f:
             if scaler is not None:

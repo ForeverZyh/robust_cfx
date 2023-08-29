@@ -15,6 +15,8 @@ from utils import dataset
 Evaluate the robustness of counterfactual explanations
 '''
 
+num_to_run = 200
+
 def main(args):
     torch.random.manual_seed(0)
 
@@ -28,10 +30,9 @@ def main(args):
                                                             dataset.CREDIT_FEAT)
         # make a deep copy of test_data
         _, test_data_orig, _ = dataset.load_data_v1("data/german_train.csv", "data/german_test.csv", "credit_risk", dataset.CREDIT_FEAT)
-        test_data.X = test_data.X[:3]
-        test_data.y = test_data.y[:3]
 
-
+    test_data.X = test_data.X[:num_to_run]
+    test_data.y = test_data.y[:num_to_run]
 
     dim_in = train_data.num_features
     
@@ -56,9 +57,10 @@ def main(args):
     if args.cfx == 'wachter':
         cfx_x, is_cfx = cfx_generator.run_wachter(scaler=minmax, max_iter=100)
     else: 
-        cfx_x, is_cfx = cfx_generator.run_proto(scaler=minmax, theta=100, onehot=args.onehot)
+        cfx_x, is_cfx = cfx_generator.run_proto(scaler=minmax, theta=100, onehot=args.onehot, num_to_run = num_to_run)
     pred_y_cor = model.forward_point_weights_bias(torch.tensor(test_data.X).float()).argmax(dim=-1) == torch.tensor(
         test_data.y)
+    
     print(f"Model accuracy: {round(torch.sum(pred_y_cor).item() / len(pred_y_cor) * 100, 2)}% "
           f"({torch.sum(pred_y_cor).item()}/{len(pred_y_cor)})")
     is_cfx = is_cfx & pred_y_cor 
@@ -67,6 +69,7 @@ def main(args):
           f" ({torch.sum(is_cfx).item()}/{len(is_cfx)}) of test points")
     # evaluate robustness first of the model on the test points
     # then evaluate the robustness of the counterfactual explanations
+
     _, cfx_output = model.get_diffs_binary(torch.tensor(test_data.X).float(), cfx_x,
                                            torch.tensor(test_data.y).bool())
     is_real_cfx = torch.where(torch.tensor(test_data.y) == 0, cfx_output > 0, cfx_output < 0) & is_cfx

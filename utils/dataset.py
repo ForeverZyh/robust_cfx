@@ -26,14 +26,14 @@ CREDIT_FEAT = {
     2: DataType.DISCRETE,  # purpose
     3: DataType.DISCRETE,  # savings
     4: DataType.DISCRETE,  # employment
-    5: DataType.ORDINAL,  # installment rate
+    5: DataType.DISCRETE,  # installment rate # ORDINAL
     6: DataType.DISCRETE,  # personal status
     7: DataType.DISCRETE,  # other debtors
-    8: DataType.ORDINAL,  # residence time
+    8: DataType.DISCRETE,  # residence time # ORDINAL
     9: DataType.DISCRETE,  # property
     10: DataType.DISCRETE,  # other installment plans
     11: DataType.DISCRETE,  # housing
-    12: DataType.ORDINAL,  # number of existing credits
+    12: DataType.DISCRETE,  # number of existing credits #ORDINAL
     13: DataType.DISCRETE,  # job
     14: DataType.DISCRETE,  # number of people being liable
     15: DataType.DISCRETE,  # telephone
@@ -46,8 +46,8 @@ CREDIT_FEAT = {
 }
 
 ORDINAL_FEATURES_CREDIT = {"installment_rate": 4, "present_residence": 4, "number_credits": 4}
-DISCRETE_FEATURES_CREDIT = {"status": 4, "credit_history": 5, "purpose": 11, "savings": 5, "employment_duration": 5, 
-                        "personal_status_sex": 5, "other_debtors": 3, "property": 4, "other_installment_plans": 3, "housing": 3,
+DISCRETE_FEATURES_CREDIT = {"status": 4, "credit_history": 5, "purpose": 10, "savings": 5, "employment_duration": 5, 
+                        "personal_status_sex": 4, "other_debtors": 3, "property": 4, "other_installment_plans": 3, "housing": 3,
                         "job": 4,"people_liable": 2, "telephone": 2, "foreign_worker": 2}
 CONTINUOUS_FEATURES_CREDIT = ["duration", "amount", "age"]
 
@@ -85,7 +85,7 @@ COLUMNS_CREDIT = ['status', 'credit_history', 'purpose', 'savings', 'employment_
  'installment_rate', 'personal_status_sex', 'other_debtors', 'present_residence', 'property',
  'other_installment_plans', 'housing', 'number_credits', 'job', 'people_liable', 'telephone',
  'foreign_worker', 'duration', 'amount', 'age']
-VALS_PER_FEATURE_CREDIT = [4, 5, 11, 5, 5, 4, 4, 3, 4, 4, 3, 3, 4, 4, 2, 2, 2, 1, 1, 1]
+VALS_PER_FEATURE_CREDIT = [4, 5, 10, 5, 5, 4, 4, 3, 4, 4, 3, 3, 4, 4, 2, 2, 2, 1, 1, 1]
 
 class Custom_Dataset(Dataset):
     '''
@@ -223,6 +223,8 @@ class Preprocessor:
                 enccolslist = [x for x in self.enc_cols]
                 self.feature_var_map[i], column_names = [enccolslist.index(name)], self.enc_cols  # continuous
             self.enc_cols = column_names
+
+        print("self.feat var map is ",self.feature_var_map)
         return df_copy, self.feature_var_map
 
     def encode_one(self, x):
@@ -258,7 +260,7 @@ def min_max_scale(df, continuous, min_vals=None, max_vals=None):
 def load_data(data, label, feature_types, min_vals=None, max_vals=None):
     '''
          Load data and preprocess it to be in the correct format for Proto CFX generation
-         Adapted from Jiang et al.
+         Adapted from Jiang et al. Uses a OHE for the data.
 
             :param data: numpy array of shape (num_samples, num_features)
             :param label: numpy array of shape (num_samples, )
@@ -269,10 +271,8 @@ def load_data(data, label, feature_types, min_vals=None, max_vals=None):
 
     cont_features = [i for i in range(train_data.num_features) if feature_types[i] == DataType.CONTINUOUS_REAL]
 
-    # preprocessor = Preprocessor(ord_features, disc_features, train_data.columns)
     preprocessor = Preprocessor(train_data.ordinal_features, train_data.discrete_features, train_data.columns)
     train_data.X, train_data.feat_var_map = preprocessor.encode_df(train_data.X)
-    print("feat var map is ",train_data.feat_var_map)
     train_data.num_features = train_data.X.shape[1]
     if type(train_data.X) != type(torch.Tensor()):
         train_data.X = np.array(train_data.X)
@@ -285,6 +285,7 @@ def load_data(data, label, feature_types, min_vals=None, max_vals=None):
 
     train_data.X = min_max_scale(train_data.X, cont_features, min_vals, max_vals)
 
+    print("num feat is ",train_data.num_features)
     return train_data, min_vals, max_vals 
 
 

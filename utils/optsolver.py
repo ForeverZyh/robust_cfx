@@ -14,9 +14,6 @@ class OptSolver:
     def __init__(self, dataset, inn, y_prime, x, mode=0, eps=0.0001, M=1000, x_prime=None):
         self.mode = mode  # mode 0: compute counterfactual, mode 1: compute lower/upper bound of INN given a delta
         self.dataset = dataset
-        # temporarily set all features to be continuous
-        # TODO fix this in dataset.py
-        self.dataset.feature_types = [DataType.CONTINUOUS_REAL] * self.dataset.num_features
         self.inn = inn
         self.y_prime = y_prime  # if 0, constraint: upper output node < 0, if 1, constraint: lower output node >= 0
         self.x = x  # explainee instance x
@@ -29,13 +26,13 @@ class OptSolver:
         self.output_node_name = None
 
     def add_input_variable_constraints(self):
-        # TODO fix given different dfn of feat_var_map
         node_var = dict()
-        for feat_idx in range(self.dataset.num_features):
+        for feat_idx, feat_mapping in self.dataset.feat_var_map.items(): #range(self.dataset.num_features):
             # cases by feature type, add different types of variables and constraints
             if self.dataset.feature_types[feat_idx] == DataType.DISCRETE:
                 disc_var_list = []
-                for var_idx in self.dataset.feat_var_map[feat_idx]:
+                #for var_idx in self.dataset.feat_var_map[feat_idx]:
+                for var_idx in feat_mapping:
                     if self.mode == 1:
                         node_var[var_idx] = self.model.addVar(lb=-float('inf'), vtype=GRB.CONTINUOUS,
                                                               name='x_disc_0_' + str(var_idx))
