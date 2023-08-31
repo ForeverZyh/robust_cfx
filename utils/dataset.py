@@ -26,6 +26,30 @@ CREDIT_FEAT = {
     2: DataType.DISCRETE,  # purpose
     3: DataType.DISCRETE,  # savings
     4: DataType.DISCRETE,  # employment
+    5: DataType.ORDINAL,  # installment rate 
+    6: DataType.DISCRETE,  # personal status
+    7: DataType.DISCRETE,  # other debtors
+    8: DataType.ORDINAL,  # residence time 
+    9: DataType.DISCRETE,  # property
+    10: DataType.DISCRETE,  # other installment plans
+    11: DataType.DISCRETE,  # housing
+    12: DataType.ORDINAL,  # number of existing credits
+    13: DataType.DISCRETE,  # job
+    14: DataType.DISCRETE,  # number of people being liable
+    15: DataType.DISCRETE,  # telephone
+    16: DataType.DISCRETE,  # foreign worker
+    17: DataType.CONTINUOUS_REAL,  # duration
+    18: DataType.CONTINUOUS_REAL,  # credit amount
+    19: DataType.CONTINUOUS_REAL,  # age
+}
+
+# NOTE marking all ordinal features as discrete because proto can only handle one-hot encoding, not ordinal encoding
+CREDIT_FEAT_PROTO = {
+    0: DataType.DISCRETE,  # checking account status
+    1: DataType.DISCRETE,  # credit history
+    2: DataType.DISCRETE,  # purpose
+    3: DataType.DISCRETE,  # savings
+    4: DataType.DISCRETE,  # employment
     5: DataType.DISCRETE,  # installment rate # ORDINAL
     6: DataType.DISCRETE,  # personal status
     7: DataType.DISCRETE,  # other debtors
@@ -95,7 +119,7 @@ class Custom_Dataset(Dataset):
     - feature_types is a dictionary {(int) feature_index: (Datatype) feature_type}
     '''
 
-    def __init__(self, data_file, label_col):
+    def __init__(self, data_file, label_col, feature_types):
         data = pd.read_csv(data_file)
         X = data.drop(columns=[label_col])
         
@@ -104,7 +128,7 @@ class Custom_Dataset(Dataset):
 
         self.num_features = self.X.shape[1]
         self.columns = X.columns
-        self.feature_types = CREDIT_FEAT
+        self.feature_types = feature_types
         self.discrete_features = {}
         self.ordinal_features = {}
         self.continuous_features = []
@@ -224,7 +248,6 @@ class Preprocessor:
                 self.feature_var_map[i], column_names = [enccolslist.index(name)], self.enc_cols  # continuous
             self.enc_cols = column_names
 
-        print("self.feat var map is ",self.feature_var_map)
         return df_copy, self.feature_var_map
 
     def encode_one(self, x):
@@ -267,7 +290,7 @@ def load_data(data, label, feature_types, min_vals=None, max_vals=None):
             :param feature_types: list of length num_features, each element is a DataType enum
             :param minmax: minmax scaler (use same scaler for train and test data)
     '''
-    train_data = Custom_Dataset(data, label)
+    train_data = Custom_Dataset(data, label, feature_types)
 
     cont_features = [i for i in range(train_data.num_features) if feature_types[i] == DataType.CONTINUOUS_REAL]
 
@@ -285,13 +308,12 @@ def load_data(data, label, feature_types, min_vals=None, max_vals=None):
 
     train_data.X = min_max_scale(train_data.X, cont_features, min_vals, max_vals)
 
-    print("num feat is ",train_data.num_features)
     return train_data, min_vals, max_vals 
 
 
 def load_data_v1(data, data_test, label, feature_types):
-    train_data = Custom_Dataset(data, label)
-    test_data = Custom_Dataset(data_test, label)
+    train_data = Custom_Dataset(data, label, feature_types)
+    test_data = Custom_Dataset(data_test, label, feature_types)
 
     minmax = MinMaxScaler(clip=True)
     train_data.X = minmax.fit_transform(train_data.X)

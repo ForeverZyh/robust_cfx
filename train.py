@@ -16,7 +16,6 @@ import argparse
 def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, cfx_method, onehot):
     model = FNN(dim_in, 2, num_hiddens, epsilon=1e-2, bias_epsilon=1e-1)
 
-    # cfx_data = dataset.Custom_Dataset("../data/german_train_lim.csv", "credit_risk")
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
     # NOTE: we need shuffle=False for CFX's to be in right order (or need to change how we generate CFX)
     # There should be dataset loader that returns index of the data point
@@ -29,7 +28,6 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, cfx_method
         with torch.no_grad():
             ret = model.forward_point_weights_bias(X)
             ret = F.softmax(ret, dim=1)
-            # so confused. proto expects softmax but somehow tensorflow wants one-dimensional output???
             ret = ret.cpu().numpy()
         return ret
 
@@ -42,6 +40,8 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, cfx_method
         model.eval()
         if epoch % cfx_generation_freq == cfx_generation_freq - 1:
             # generate CFX
+            # TODO more intelligent, only regenerate if invalid
+            # TODO parallelize CFX generation? might not be necessary if moving to GPUs
             if cfx_method == "proto":
                 cfx_x, is_cfx = cfx_generator.run_proto(scaler=None, theta=100, onehot=onehot)
             else:
@@ -166,12 +166,16 @@ if __name__ == '__main__':
 
     torch.random.manual_seed(0)
 
+    if args.cfx == 'proto':
+        feature_types = dataset.CREDIT_FEAT_PROTO
+    else:
+        feature_types = dataset.CREDIT_FEAT
     if args.onehot:
-        train_data, min_vals, max_vals = dataset.load_data("data/german_train.csv", "credit_risk", dataset.CREDIT_FEAT)
-        test_data, _, _ = dataset.load_data("data/german_test.csv", "credit_risk", dataset.CREDIT_FEAT, min_vals, max_vals)
+        train_data, min_vals, max_vals = dataset.load_data("data/german_train.csv", "credit_risk", feature_types)
+        test_data, _, _ = dataset.load_data("data/german_test.csv", "credit_risk", feature_types, min_vals, max_vals)
     else:
         train_data, test_data, minmax = dataset.load_data_v1("data/german_train.csv", "data/german_test.csv", "credit_risk",
-                                            dataset.CREDIT_FEAT)
+                                            feature_types)
     batch_size = 64
     dim_in = train_data.num_features
     num_hiddens = [10, 10]

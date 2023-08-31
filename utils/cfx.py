@@ -87,20 +87,7 @@ class CFX_Generator:
         # self.build_inns()
 
     def build_test_instances(self):
-        ''' 
-        Existing (now, commented-out) code chose 50 samples at random based on the desired class.
-        We want CFX for all samples, so we just return X
-        '''
-        # np.random.seed(1)
-        # if self.desired_class >= 0:
-        #     if self.desired_class == 1:
-        #         random_idx = np.where(self.clf.predict(self.X.values) == 0)[0]
-        #     else:
-        #         random_idx = np.where(self.clf.predict(self.X.values) == 1)[0]
-        #     random_idx = np.random.choice(random_idx, min(self.num_test_instances, len(random_idx)))
-        # else:
-        #     random_idx = np.random.randint(len(self.X.values) - 1, size=(self.num_test_instances,))
-        # self.test_instances = self.X.values[random_idx]
+        ''' in the future, may want to, e.g., select test instances that have predicted class=0'''
         self.test_instances = self.X
 
     def run_proto(self, kap=0, theta=10., scaler=None, test_instances=None, onehot=False, num_to_run = None):
@@ -113,8 +100,6 @@ class CFX_Generator:
         if num_to_run == None:
             num_to_run = len(test_instances)
         
-        # From alibi documentation: the keys of the cat_vars dictionary represent the column where each categorical variable 
-        # starts while the values still return the number of categories.
         i = 0
         if onehot:
             for idx in self.dataset.feature_types:
@@ -136,24 +121,22 @@ class CFX_Generator:
                 num_vals = int(self.dataset.ordinal_features[idx].item())
                 cat_var[idx] = num_vals
             
-        # NOTE: can add this line to make it work. But we don't want to do this because then categorical variables are treated as continuous
-        # cat_var = {}
-
         CEs, is_CE = [], []
         start_time = time.time()
-        #feature_range = (np.array(self.X.min(axis=0)).reshape(1, -1), np.array(self.X.max(axis=0)).reshape(1, -1))
-        # NOTE if we uncomment following line with OHE, fails on cf.fit() rather than cfproto.CounterfactualProto()
-        feature_range = (np.zeros((1,20)), np.ones((1,20)))
+        #feature_range = (np.zeros((1,20)), np.ones((1,20)))
+        rng = (0., 1.)  # scale features between 0 and 1
+        rng_shape = (1,20)# + data.shape[1:] # needs to be defined as original (not OHE) feature space
+        feature_range = ((np.ones(rng_shape) * rng[0]).astype(np.float32), 
+                 (np.ones(rng_shape) * rng[1]).astype(np.float32))
         if cat_var == {}:
             # only continuous features
             cf = cfproto.CounterfactualProto(predict_fn, shape, use_kdtree=True, theta=theta, kappa=kap,
                                              feature_range=feature_range)
             cf.fit(self.X, trustscore_kwargs=None)
         else:
-            # NOTE this line fails if trying with or without OHE
             cf = cfproto.CounterfactualProto(predict_fn, shape, use_kdtree=True, theta=theta, feature_range = feature_range,
-                                             cat_vars=cat_var, kappa=kap, ohe=onehot)
-            # NOTE this line fails if trying with OHE and use a feature_range of dimension 20
+                                             cat_vars=cat_var, kappa=kap, ohe=onehot, beta = 0.01, c_init = 1.0, c_steps = 5,
+                                             max_iterations=500, eps=(1e-2, 1e-2), update_num_grad=1)
             cf.fit(np.array(self.X)) 
         j=0
         for i, x in tqdm(enumerate(self.test_instances)):
@@ -185,12 +168,14 @@ class CFX_Generator:
                 pickle.dump(scaler.inverse_transform(CEs), f)
             else:
                 pickle.dump(CEs, f)
+        with open('CEsProtoBool.pkl', 'wb') as f:
+            pickle.dump(is_CE, f)
 
         return torch.tensor(np.array(CEs).astype('float32')).squeeze(), torch.tensor(
             np.array(is_CE).astype('bool')).squeeze()
 
     def run_wachter(self, lam_init=0.0001, max_iter=100, max_lam_steps=10, target_proba=0.6, scaler=None,
-                    test_instances=None):
+                    test_instances=None, num_to_run = None):
         ''' 
         This algorithm isn't great -- no logical constraints on feature values so finds non-integral
         values for categorical features. As far as I can tell, no way to change this.
@@ -198,6 +183,8 @@ class CFX_Generator:
 
         if test_instances == None:
             test_instances = self.test_instances
+        if num_to_run == None:
+            num_to_run = len(test_instances)
         CEs = []
         is_CE = []
         data_point = np.array(self.X[1])
@@ -215,6 +202,8 @@ class CFX_Generator:
         start_time = time.time()
         i = 0
         for x in tqdm(test_instances):
+            if i == num_to_run:
+                break
             i += 1
             this_point = x
             with HiddenPrints():
@@ -233,13 +222,15 @@ class CFX_Generator:
             CEs.append(this_cf)
             is_CE.append(1)
         print("total computation time in s:", time.time() - start_time)
-        assert len(CEs) == len(test_instances)
+        assert len(CEs) == num_to_run
         # save CEs to file
         with open('CEsWachter.pkl', 'wb') as f:
             if scaler is not None:
                 pickle.dump(scaler.inverse_transform(CEs), f)
             else:
                 pickle.dump(CEs, f)
+        with open('CEsWachterBool.pkl', 'wb') as f:
+            pickle.dump(is_CE, f)
 
         return torch.tensor(np.array(CEs).astype('float32')).squeeze(), torch.tensor(
             np.array(is_CE).astype('bool')).squeeze()

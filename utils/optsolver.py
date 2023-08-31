@@ -27,11 +27,10 @@ class OptSolver:
 
     def add_input_variable_constraints(self):
         node_var = dict()
-        for feat_idx, feat_mapping in self.dataset.feat_var_map.items(): #range(self.dataset.num_features):
+        for feat_idx, feat_mapping in self.dataset.feat_var_map.items(): 
             # cases by feature type, add different types of variables and constraints
             if self.dataset.feature_types[feat_idx] == DataType.DISCRETE:
                 disc_var_list = []
-                #for var_idx in self.dataset.feat_var_map[feat_idx]:
                 for var_idx in feat_mapping:
                     if self.mode == 1:
                         node_var[var_idx] = self.model.addVar(lb=-float('inf'), vtype=GRB.CONTINUOUS,

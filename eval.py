@@ -1,7 +1,6 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-import tqdm
 
 import argparse
 
@@ -15,21 +14,26 @@ from utils import dataset
 Evaluate the robustness of counterfactual explanations
 '''
 
-num_to_run = 200
+num_to_run = 3
 
 def main(args):
     torch.random.manual_seed(0)
 
+    if args.cfx == 'proto':
+        feature_types = dataset.CREDIT_FEAT_PROTO
+    else:
+        feature_types = dataset.CREDIT_FEAT
+
     if args.onehot:
         minmax = None
-        train_data, min_vals, max_vals = dataset.load_data("data/german_train.csv", "credit_risk", dataset.CREDIT_FEAT)
-        test_data, _, _ = dataset.load_data("data/german_test.csv", "credit_risk", dataset.CREDIT_FEAT, min_vals, max_vals)
-        test_data_orig, _, _ = dataset.load_data('data/german_test.csv', "credit_risk", dataset.CREDIT_FEAT, min_vals, max_vals)
+        train_data, min_vals, max_vals = dataset.load_data("data/german_train.csv", "credit_risk", feature_types)
+        test_data, _, _ = dataset.load_data("data/german_test.csv", "credit_risk", feature_types, min_vals, max_vals)
+        test_data_orig, _, _ = dataset.load_data('data/german_test.csv', "credit_risk", feature_types, min_vals, max_vals)
     else:
         train_data, test_data, minmax = dataset.load_data_v1("data/german_train.csv", "data/german_test.csv", "credit_risk",
-                                                            dataset.CREDIT_FEAT)
-        # make a deep copy of test_data
-        _, test_data_orig, _ = dataset.load_data_v1("data/german_train.csv", "data/german_test.csv", "credit_risk", dataset.CREDIT_FEAT)
+                                                            feature_types)
+        
+        _, test_data_orig, _ = dataset.load_data_v1("data/german_train.csv", "data/german_test.csv", "credit_risk", feature_types)
 
     test_data.X = test_data.X[:num_to_run]
     test_data.y = test_data.y[:num_to_run]
@@ -55,9 +59,9 @@ def main(args):
     cfx_generator = cfx.CFX_Generator(predictor, test_data_orig, num_layers=len(num_hiddens))
 
     if args.cfx == 'wachter':
-        cfx_x, is_cfx = cfx_generator.run_wachter(scaler=minmax, max_iter=100)
+        cfx_x, is_cfx = cfx_generator.run_wachter(scaler=minmax, max_iter=100, num_to_run = num_to_run)
     else: 
-        cfx_x, is_cfx = cfx_generator.run_proto(scaler=minmax, theta=100, onehot=args.onehot, num_to_run = num_to_run)
+        cfx_x, is_cfx = cfx_generator.run_proto(scaler=minmax, theta=10., onehot=args.onehot, num_to_run = num_to_run)
     pred_y_cor = model.forward_point_weights_bias(torch.tensor(test_data.X).float()).argmax(dim=-1) == torch.tensor(
         test_data.y)
     
@@ -67,6 +71,7 @@ def main(args):
     total_valid = torch.sum(is_cfx).item() / len(is_cfx)
     print(f"Found CFX for {round(total_valid * 100, 2)}%"
           f" ({torch.sum(is_cfx).item()}/{len(is_cfx)}) of test points")
+
     # evaluate robustness first of the model on the test points
     # then evaluate the robustness of the counterfactual explanations
 
@@ -79,11 +84,19 @@ def main(args):
           f" ({torch.sum(is_real_cfx).item()}/{torch.sum(is_cfx).item()})")
     # TODO eventually eval how good (feasible) CFX are
 
+
+    # TODO figure this out - what ordinal validity checks do we want?
+    # before running our checks, if using proto, change data types back to original (include ordinal constraints)
+    # but not completely - will not fix ordinal encoding
+    # also problematic for training data
+    # if args.cfx == 'proto':
+    #     test_data.feature_types = dataset.CREDIT_FEAT
+
     solver_robust_cnt = 0
     solver_bound_better = 0
     for i, (x, y, cfx_x_, is_cfx_, loose_bound) in enumerate(zip(test_data.X, test_data.y, cfx_x, is_cfx, cfx_output)):
         if is_cfx_:
-            # print("x: ", x, "y: ", y, "cfx: ", cfx_x)
+            # print("x: ", x, "y: ", y, "cfx: ", cfx_x_)
             solver = optsolver.OptSolver(test_data, inn, 1 - y, x, mode=1, x_prime=cfx_x_)
             res, bound = solver.compute_inn_bounds()
             # print(i, 1 - y, res, bound, loose_bound.item())
