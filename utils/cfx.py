@@ -16,11 +16,13 @@ import utils.dataset
 
 tf.compat.v1.disable_eager_execution()  # required for functionality like placeholder
 
+
 # open a file with pickle
 def open_pickle(filename):
     with open(filename, 'rb') as f:
         return pickle.load(f)
-    
+
+
 # parts of this file copied from https://github.com/junqi-jiang/robust-ce-inn/blob/main/expnns/utilexp.py
 class HiddenPrints:
     def __enter__(self):
@@ -31,10 +33,12 @@ class HiddenPrints:
         sys.stdout.close()
         sys.stdout = self._original_stdout
 
+
 def get_clf_num_layers(model):
     if isinstance(model, torch.nn.Sequential):
         return model.num_hiddens
     return model.hidden_layer_sizes
+
 
 def build_dataset_feature_types(columns, ordinal, discrete, continuous):
     feature_types = dict()
@@ -45,6 +49,7 @@ def build_dataset_feature_types(columns, ordinal, discrete, continuous):
     for feat in continuous:
         feature_types[columns.index(feat)] = DataType.CONTINUOUS_REAL
     return feature_types
+
 
 class CFX_Generator:
     '''
@@ -90,16 +95,16 @@ class CFX_Generator:
         ''' in the future, may want to, e.g., select test instances that have predicted class=0'''
         self.test_instances = self.X
 
-    def run_proto(self, kap=0, theta=10., scaler=None, test_instances=None, onehot=False, num_to_run = None):
-        if test_instances == None:
+    def run_proto(self, kap=0, theta=10., scaler=None, test_instances=None, onehot=False, num_to_run=None):
+        if test_instances is None:
             test_instances = self.test_instances
         data_point = np.array(self.X[1])
         shape = (1,) + data_point.shape[:]
         predict_fn = lambda x: self.model(x)
         cat_var = {}
-        if num_to_run == None:
+        if num_to_run is None:
             num_to_run = len(test_instances)
-        
+
         i = 0
         if onehot:
             for idx in self.dataset.feature_types:
@@ -120,29 +125,27 @@ class CFX_Generator:
             for idx in self.dataset.ordinal_features.keys():
                 num_vals = int(self.dataset.ordinal_features[idx].item())
                 cat_var[idx] = num_vals
-            
+
         CEs, is_CE = [], []
         start_time = time.time()
-        #feature_range = (np.zeros((1,20)), np.ones((1,20)))
+        # feature_range = (np.zeros((1,20)), np.ones((1,20)))
         rng = (0., 1.)  # scale features between 0 and 1
-        rng_shape = (1,20)# + data.shape[1:] # needs to be defined as original (not OHE) feature space
-        feature_range = ((np.ones(rng_shape) * rng[0]).astype(np.float32), 
-                 (np.ones(rng_shape) * rng[1]).astype(np.float32))
+        rng_shape = (1, 20)  # + data.shape[1:] # needs to be defined as original (not OHE) feature space
+        feature_range = ((np.ones(rng_shape) * rng[0]).astype(np.float32),
+                         (np.ones(rng_shape) * rng[1]).astype(np.float32))
         if cat_var == {}:
             # only continuous features
             cf = cfproto.CounterfactualProto(predict_fn, shape, use_kdtree=True, theta=theta, kappa=kap,
                                              feature_range=feature_range)
             cf.fit(self.X, trustscore_kwargs=None)
         else:
-            cf = cfproto.CounterfactualProto(predict_fn, shape, use_kdtree=True, theta=theta, feature_range = feature_range,
-                                             cat_vars=cat_var, kappa=kap, ohe=onehot, beta = 0.01, c_init = 1.0, c_steps = 5,
+            cf = cfproto.CounterfactualProto(predict_fn, shape, use_kdtree=True, theta=theta,
+                                             feature_range=feature_range,
+                                             cat_vars=cat_var, kappa=kap, ohe=onehot, beta=0.01, c_init=1.0, c_steps=5,
                                              max_iterations=500, eps=(1e-2, 1e-2), update_num_grad=1)
-            cf.fit(np.array(self.X)) 
-        j=0
-        for i, x in tqdm(enumerate(self.test_instances)):
-            if j == num_to_run:
-                break
-            j +=1
+            cf.fit(np.array(self.X))
+        test_instances = test_instances[:num_to_run]
+        for i, x in enumerate(tqdm(test_instances)):
             this_point = x
             with HiddenPrints():
                 explanation = cf.explain(this_point.reshape(1, -1), Y=None, target_class=None, k=20, k_type='mean',
@@ -175,15 +178,15 @@ class CFX_Generator:
             np.array(is_CE).astype('bool')).squeeze()
 
     def run_wachter(self, lam_init=0.0001, max_iter=100, max_lam_steps=10, target_proba=0.6, scaler=None,
-                    test_instances=None, num_to_run = None):
+                    test_instances=None, num_to_run=None):
         ''' 
         This algorithm isn't great -- no logical constraints on feature values so finds non-integral
         values for categorical features. As far as I can tell, no way to change this.
         '''
 
-        if test_instances == None:
+        if test_instances is None:
             test_instances = self.test_instances
-        if num_to_run == None:
+        if num_to_run is None:
             num_to_run = len(test_instances)
         CEs = []
         is_CE = []

@@ -161,7 +161,7 @@ if __name__ == '__main__':
     parser.add_argument('model_name', type=str, help="filename to save the model parameters to (don't include models/ or .pt )")
     parser.add_argument('--model', type=str, default='IBP', help='IBP or Standard', choices=['IBP', 'Standard'])
     parser.add_argument('--cfx', type=str, default="wachter", help="wachter or proto")
-    parser.add_argument('--onehot', type=bool, default=False, help="whether to use onehot encoding on the data")
+    parser.add_argument('--onehot', action='store_true', help='whether to use one-hot encoding')
     args = parser.parse_args()
 
     torch.random.manual_seed(0)
