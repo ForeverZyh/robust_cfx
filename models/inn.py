@@ -12,7 +12,7 @@ class Interval:
         self.ub = ub
 
     def get_bound(self, y_prime):
-        return self.lb if y_prime is 1 else self.ub
+        return self.lb if y_prime == 1 else self.ub
 
 
 class Node(Interval):

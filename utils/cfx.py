@@ -90,16 +90,17 @@ class CFX_Generator:
         ''' in the future, may want to, e.g., select test instances that have predicted class=0'''
         self.test_instances = self.X
 
-    def run_proto(self, kap=0, theta=10., scaler=None, test_instances=None, onehot=False, num_to_run = None):
-        if test_instances == None:
-            test_instances = self.test_instances
-        data_point = np.array(self.X[1])
-        shape = (1,) + data_point.shape[:]
-        predict_fn = lambda x: self.model(x)
+    def setup_CE_arrays(self, CEs, is_CE, regenerate, num_to_run, num_features):
+        if CEs is None:
+            CEs = np.zeros((num_to_run, num_features))
+        if is_CE is None:
+            is_CE = np.zeros(num_to_run).astype(bool)
+        if regenerate is None:
+            regenerate = np.ones(num_to_run).astype(bool)
+        return torch.tensor(CEs), is_CE, regenerate
+
+    def setup_cat_vars(self, onehot):
         cat_var = {}
-        if num_to_run == None:
-            num_to_run = len(test_instances)
-        
         i = 0
         if onehot:
             for idx in self.dataset.feature_types:
@@ -120,14 +121,29 @@ class CFX_Generator:
             for idx in self.dataset.ordinal_features.keys():
                 num_vals = int(self.dataset.ordinal_features[idx].item())
                 cat_var[idx] = num_vals
-            
-        CEs, is_CE = [], []
+        return cat_var
+
+    def run_proto(self, kap=0, theta=10., scaler=None, test_instances=None, onehot=False, num_to_run = None,
+                    CEs = None, is_CE = None, regenerate = None):
+        if test_instances is None:
+            test_instances = self.test_instances
+        data_point = np.array(self.X[1])
+        shape = (1,) + data_point.shape[:]
+        predict_fn = lambda x: self.model(x)
+        if num_to_run == None:
+            num_to_run = len(test_instances)
+        
+        cat_var = self.setup_cat_vars(onehot)
+        CEs, is_CE, regenerate = self.setup_CE_arrays(CEs, is_CE, regenerate, num_to_run, test_instances.shape[1])
+        print("regenerating for indices ", np.where(regenerate)[0])
+
         start_time = time.time()
-        #feature_range = (np.zeros((1,20)), np.ones((1,20)))
+
         rng = (0., 1.)  # scale features between 0 and 1
-        rng_shape = (1,20)# + data.shape[1:] # needs to be defined as original (not OHE) feature space
+        rng_shape = (1, len(self.dataset.feature_types)) # needs to be defined as original (not OHE) feature space
         feature_range = ((np.ones(rng_shape) * rng[0]).astype(np.float32), 
                  (np.ones(rng_shape) * rng[1]).astype(np.float32))
+        
         if cat_var == {}:
             # only continuous features
             cf = cfproto.CounterfactualProto(predict_fn, shape, use_kdtree=True, theta=theta, kappa=kap,
@@ -137,31 +153,27 @@ class CFX_Generator:
             cf = cfproto.CounterfactualProto(predict_fn, shape, use_kdtree=True, theta=theta, feature_range = feature_range,
                                              cat_vars=cat_var, kappa=kap, ohe=onehot, beta = 0.01, c_init = 1.0, c_steps = 5,
                                              max_iterations=500, eps=(1e-2, 1e-2), update_num_grad=1)
-            cf.fit(np.array(self.X)) 
-        j=0
+            cf.fit(self.X)
         for i, x in tqdm(enumerate(self.test_instances)):
-            if j == num_to_run:
+            if i == num_to_run:
                 break
-            j +=1
+            if not regenerate[i]:
+                print("skipping index ",i)
+                continue
             this_point = x
             with HiddenPrints():
                 explanation = cf.explain(this_point.reshape(1, -1), Y=None, target_class=None, k=20, k_type='mean',
                                          threshold=0., verbose=True, print_every=10, log_every=10)
-            if explanation is None:
-                CEs.append(this_point)
-                is_CE.append(0)
+            if explanation is None or explanation["cf"] is None:
+                CEs[i,:] = torch.tensor(this_point)
+                is_CE[i] = 0
                 continue
-            if explanation["cf"] is None:
-                CEs.append(this_point)
-                is_CE.append(0)
-                continue
-            proto_cf = explanation["cf"]["X"]
-            proto_cf = proto_cf[0]
-            this_cf = np.array(proto_cf)
-            CEs.append(this_cf)
-            is_CE.append(1)
+            this_cf = explanation["cf"]["X"]
+            this_cf = np.array(this_cf[0])
+            CEs[i,:] = torch.tensor(this_cf)
+            is_CE[i] = 1
         print("total computation time in s:", time.time() - start_time)
-        assert len(CEs) == num_to_run
+
         # save CEs to file
         with open('CEsProto.pkl', 'wb') as f:
             if scaler is not None:
@@ -171,27 +183,32 @@ class CFX_Generator:
         with open('CEsProtoBool.pkl', 'wb') as f:
             pickle.dump(is_CE, f)
 
-        return torch.tensor(np.array(CEs).astype('float32')).squeeze(), torch.tensor(
-            np.array(is_CE).astype('bool')).squeeze()
+        return torch.tensor(np.array(CEs).astype('float32')).squeeze(),\
+                     torch.tensor(np.array(is_CE).astype('bool')).squeeze()
 
     def run_wachter(self, lam_init=0.0001, max_iter=100, max_lam_steps=10, target_proba=0.6, scaler=None,
-                    test_instances=None, num_to_run = None):
+                    test_instances=None, num_to_run = None, CEs = None, is_CE = None, regenerate = None):
         ''' 
         This algorithm isn't great -- no logical constraints on feature values so finds non-integral
         values for categorical features. As far as I can tell, no way to change this.
+
+        CEs - list of counterfactuals, can be passed in to save previous CFX if we only want to update certain
+                instances
+        is_CE - list of booleans of whether each CFX generation was successful
         '''
 
-        if test_instances == None:
+        if test_instances is None:
             test_instances = self.test_instances
-        if num_to_run == None:
+        if num_to_run is None:
             num_to_run = len(test_instances)
-        CEs = []
-        is_CE = []
+
+        CEs, is_CE, regenerate = self.setup_CE_arrays(CEs, is_CE, regenerate, num_to_run, test_instances.shape[1])
+        print("regenerating for indices ", np.where(regenerate)[0])
+
         data_point = np.array(self.X[1])
         shape = (1,) + data_point.shape[:]
         predict_fn = lambda x: self.model(x)
 
-        lam_init = 0.001  # was 0.1
         eps = 0.1  # was 0.01
         tol = 0.1  # was 0.05
         cf = Counterfactual(predict_fn, shape, distance_fn='l1', target_proba=target_proba,
@@ -200,29 +217,24 @@ class CFX_Generator:
                             feature_range=(0, 1), eps=eps, init='identity',
                             decay=True, write_dir=None, debug=False)
         start_time = time.time()
-        i = 0
-        for x in tqdm(test_instances):
+        for i, x in enumerate(tqdm(test_instances)):
             if i == num_to_run:
                 break
-            i += 1
+            if not regenerate[i]:
+                print("skipping index ",i)
+                continue
             this_point = x
             with HiddenPrints():
                 explanation = cf.explain(this_point.reshape(1, -1))
-            if explanation is None:
-                CEs.append(this_point)
-                is_CE.append(0)
+            if explanation is None or explanation['cf'] is None:
+                CEs[i,:] = torch.tensor(this_point)
+                is_CE[i] = 0
                 continue
-            if explanation["cf"] is None:
-                CEs.append(this_point)
-                is_CE.append(0)
-                continue
-            proto_cf = explanation["cf"]["X"]
-            proto_cf = proto_cf[0]
-            this_cf = np.array(proto_cf)
-            CEs.append(this_cf)
-            is_CE.append(1)
+            this_cf = explanation["cf"]["X"]
+            CEs[i,:] = torch.tensor(np.array(this_cf[0]))
+            is_CE[i] = 1
         print("total computation time in s:", time.time() - start_time)
-        assert len(CEs) == num_to_run
+
         # save CEs to file
         with open('CEsWachter.pkl', 'wb') as f:
             if scaler is not None:
@@ -232,5 +244,5 @@ class CFX_Generator:
         with open('CEsWachterBool.pkl', 'wb') as f:
             pickle.dump(is_CE, f)
 
-        return torch.tensor(np.array(CEs).astype('float32')).squeeze(), torch.tensor(
-            np.array(is_CE).astype('bool')).squeeze()
+        return torch.tensor(np.array(CEs).astype('float32')).squeeze(), \
+                    torch.tensor(np.array(is_CE).astype('bool')).squeeze()

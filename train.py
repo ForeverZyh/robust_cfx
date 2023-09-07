@@ -19,7 +19,7 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, cfx_method
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
     # NOTE: we need shuffle=False for CFX's to be in right order (or need to change how we generate CFX)
     # There should be dataset loader that returns index of the data point
-    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
+    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=False)
     test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
 
     @torch.no_grad()
@@ -32,20 +32,24 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, cfx_method
         return ret
 
     cfx_generator = cfx.CFX_Generator(predictor, train_data, num_layers=len(num_hiddens))
-    cfx_generation_freq = 20
+    cfx_generation_freq = 10
     eval_freq = 5
+    max_epochs = 50
     cfx_x = None
     is_cfx = None
-    for epoch in range(50):
+    regenerate = np.ones(len(train_data)).astype(bool)
+    for epoch in range(max_epochs):
         model.eval()
-        if epoch % cfx_generation_freq == cfx_generation_freq - 1:
+        if epoch % cfx_generation_freq == cfx_generation_freq - 1 and (epoch != max_epochs - 1):
+                
             # generate CFX
-            # TODO more intelligent, only regenerate if invalid
             # TODO parallelize CFX generation? might not be necessary if moving to GPUs
             if cfx_method == "proto":
-                cfx_x, is_cfx = cfx_generator.run_proto(scaler=None, theta=100, onehot=onehot)
+                cfx_x, is_cfx = cfx_generator.run_proto(scaler=None, theta=100, onehot=onehot, 
+                                                            CEs = cfx_x, is_CE = is_cfx, regenerate = regenerate)
             else:
-                cfx_x, is_cfx = cfx_generator.run_wachter(scaler=None, max_iter=100)
+                cfx_x, is_cfx = cfx_generator.run_wachter(scaler=None, max_iter=100, 
+                                                            CEs = cfx_x, is_CE = is_cfx, regenerate = regenerate, lam_init=0.001, max_lam_steps=10)
         model.train()
         total_loss = 0
         for batch, (X, y, idx) in enumerate(train_dataloader):
@@ -56,7 +60,7 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, cfx_method
                 this_cfx = cfx_x[idx]
                 this_is_cfx = is_cfx[idx]
                 loss = model.get_loss(X, y, this_cfx, this_is_cfx,
-                                      0.1)  # changing lambda_ratio to 0.0 results in low CFX accuracy.
+                                      0.01)  # changing lambda_ratio to 0.0 results in low CFX accuracy.
             total_loss += loss.item() * X.shape[0]
             loss.backward()
             optimizer.step()
@@ -82,6 +86,7 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, cfx_method
                     is_cfx[idx] = is_cfx[idx] & (cfx_y == (1 - y)).bool()
                     post_valid += torch.sum(is_cfx[idx]).item()
                 print("Epoch", str(epoch), "CFX valid:", pre_valid, post_valid)
+                regenerate = np.logical_not(is_cfx)
 
     model.eval()
     with torch.no_grad():
