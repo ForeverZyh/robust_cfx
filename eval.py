@@ -10,9 +10,40 @@ from utils import optsolver
 from utils import cfx
 from utils import dataset
 
+import pickle
+
 '''
 Evaluate the robustness of counterfactual explanations
 '''
+
+
+def create_CFX(args, model, minmax, train_data, test_data, num_hiddens):
+    @torch.no_grad()
+    def predictor(X: np.ndarray) -> np.ndarray:
+        X = torch.as_tensor(X, dtype=torch.float32)
+        with torch.no_grad():
+            ret = model.forward_point_weights_bias(X)
+            ret = F.softmax(ret, dim=1)
+            ret = ret.cpu().numpy()
+        return ret
+
+    cfx_generator = cfx.CFX_Generator(predictor, train_data, num_layers=len(num_hiddens))
+
+    if args.cfx == 'wachter':
+        cfx_x, is_cfx = cfx_generator.run_wachter(scaler=minmax, max_iter=500,
+                                                  test_instances=test_data.X, lam_init=0.001, max_lam_steps=10)
+    else:
+        cfx_x, is_cfx = cfx_generator.run_proto(scaler=minmax, theta=10., onehot=args.onehot, test_instances=test_data.X)
+
+    return cfx_x, is_cfx
+
+
+def load_CFX(args):
+    with open(args.CEfile, 'rb') as f:
+        cfx_x = pickle.load(f)
+    with open(args.isCEfile, 'rb') as f:
+        is_cfx = pickle.load(f)
+    return cfx_x, is_cfx
 
 
 def main(args):
@@ -27,15 +58,10 @@ def main(args):
         minmax = None
         train_data, min_vals, max_vals = dataset.load_data("data/german_train.csv", "credit_risk", feature_types)
         test_data, _, _ = dataset.load_data("data/german_test.csv", "credit_risk", feature_types, min_vals, max_vals)
-        test_data_orig, _, _ = dataset.load_data('data/german_test.csv', "credit_risk", feature_types, min_vals,
-                                                 max_vals)
     else:
         train_data, test_data, minmax = dataset.load_data_v1("data/german_train.csv", "data/german_test.csv",
                                                              "credit_risk",
                                                              feature_types)
-
-        _, test_data_orig, _ = dataset.load_data_v1("data/german_train.csv", "data/german_test.csv", "credit_risk",
-                                                    feature_types)
 
     if args.num_to_run is not None:
         test_data.X = test_data.X[:args.num_to_run]
@@ -45,26 +71,16 @@ def main(args):
 
     num_hiddens = [10, 10]
 
-    model = FNN(dim_in, 2, num_hiddens, epsilon=1e-2, bias_epsilon=1e-1)
+    model = FNN(dim_in, 2, num_hiddens, epsilon=args.epsilon, bias_epsilon=args.bias_epsilon)
     model.load_state_dict(torch.load(args.model))
     model.eval()
     inn = Inn.from_IBPModel(model)
 
-    @torch.no_grad()
-    def predictor(X: np.ndarray) -> np.ndarray:
-        X = torch.as_tensor(X, dtype=torch.float32)
-        with torch.no_grad():
-            ret = model.forward_point_weights_bias(X)
-            ret = F.softmax(ret, dim=1)
-            ret = ret.cpu().numpy()
-        return ret
-
-    cfx_generator = cfx.CFX_Generator(predictor, train_data, num_layers=len(num_hiddens))
-
-    if args.cfx == 'wachter':
-        cfx_x, is_cfx = cfx_generator.run_wachter(scaler=minmax, max_iter=100, test_instances=test_data.X,)
+    if args.CEfile == None:
+        cfx_x, is_cfx = create_CFX(args, model, minmax, train_data, test_data, num_hiddens)
     else:
-        cfx_x, is_cfx = cfx_generator.run_proto(scaler=minmax, theta=10., onehot=args.onehot, test_instances=test_data.X)
+        cfx_x, is_cfx = load_CFX(args)
+
     pred_y_cor = model.forward_point_weights_bias(torch.tensor(test_data.X).float()).argmax(dim=-1) == torch.tensor(
         test_data.y)
 
@@ -121,6 +137,11 @@ if __name__ == "__main__":
     parser.add_argument('--cfx', type=str, default="wachter")
     parser.add_argument('--num_to_run', type=int, default=None, help='number of test examples to run')
     parser.add_argument('--onehot', action='store_true', help='whether to use one-hot encoding')
+    parser.add_argument('--CEfile', type=str, default=None, help='path to CE file')
+    parser.add_argument('--isCEfile', type=str, default=None, help='path to file specifying whether CE is real or not')
+
+    parser.add_argument('--epsilon', type=float, default=1e-2, help='epsilon for IBP')
+    parser.add_argument('--bias_epsilon', type=float, default=1e-1, help='bias epsilon for IBP')
     args = parser.parse_args()
 
     assert args.cfx in ["wachter", "proto"]
