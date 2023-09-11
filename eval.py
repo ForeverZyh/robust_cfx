@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
+import os
 
 import argparse
 
@@ -30,10 +31,12 @@ def create_CFX(args, model, minmax, train_data, test_data, num_hiddens):
     cfx_generator = cfx.CFX_Generator(predictor, train_data, num_layers=len(num_hiddens))
 
     if args.cfx == 'wachter':
-        cfx_x, is_cfx = cfx_generator.run_wachter(scaler=minmax, max_iter=500,
-                                                  test_instances=test_data.X, lam_init=0.001, max_lam_steps=10)
+        cfx_x, is_cfx = cfx_generator.run_wachter(scaler=minmax, max_iter=args.wachter_max_iter,
+                                                  test_instances=test_data.X, lam_init=args.wachter_lam_init,
+                                                  max_lam_steps=args.wachter_max_lam_steps)
     else:
-        cfx_x, is_cfx = cfx_generator.run_proto(scaler=minmax, theta=10., onehot=args.onehot, test_instances=test_data.X)
+        cfx_x, is_cfx = cfx_generator.run_proto(scaler=minmax, theta=args.proto_theta, onehot=args.onehot,
+                                                test_instances=test_data.X)
 
     return cfx_x, is_cfx
 
@@ -72,7 +75,7 @@ def main(args):
     num_hiddens = [10, 10]
 
     model = FNN(dim_in, 2, num_hiddens, epsilon=args.epsilon, bias_epsilon=args.bias_epsilon)
-    model.load_state_dict(torch.load(args.model))
+    model.load_state_dict(torch.load(os.path.join(args.save_dir, args.model)))
     model.eval()
     inn = Inn.from_IBPModel(model)
 
@@ -83,9 +86,14 @@ def main(args):
 
     pred_y_cor = model.forward_point_weights_bias(torch.tensor(test_data.X).float()).argmax(dim=-1) == torch.tensor(
         test_data.y)
+    pred_y_cor_train = model.forward_point_weights_bias(torch.tensor(train_data.X).float()).argmax(
+        dim=-1) == torch.tensor(
+        train_data.y)
 
-    print(f"Model accuracy: {round(torch.sum(pred_y_cor).item() / len(pred_y_cor) * 100, 2)}% "
+    print(f"Model test accuracy: {round(torch.sum(pred_y_cor).item() / len(pred_y_cor) * 100, 2)}% "
           f"({torch.sum(pred_y_cor).item()}/{len(pred_y_cor)})")
+    print(f"Model train accuracy: {round(torch.sum(pred_y_cor_train).item() / len(pred_y_cor_train) * 100, 2)}% "
+          f"({torch.sum(pred_y_cor_train).item()}/{len(pred_y_cor_train)})")
     is_cfx = is_cfx & pred_y_cor
     total_valid = torch.sum(is_cfx).item() / len(is_cfx)
     print(f"Found CFX for {round(total_valid * 100, 2)}%"
@@ -118,7 +126,7 @@ def main(args):
             solver = optsolver.OptSolver(test_data, inn, 1 - y, x, mode=1, x_prime=cfx_x_)
             res, bound = solver.compute_inn_bounds()
             # print(i, 1 - y, res, bound, loose_bound.item())
-            if abs(bound - loose_bound.item()) > 1e-2:
+            if bound is not None and abs(bound - loose_bound.item()) > 1e-2:
                 solver_bound_better += 1
                 # print(i, 1 - y, res, bound, loose_bound.item())
             if res == 1:
@@ -134,16 +142,20 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('model', type=str, help='path to model with .pt extension')
-    parser.add_argument('--cfx', type=str, default="wachter")
+    parser.add_argument('--save_dir', type=str, default="trained_models", help="directory to save models to")
+    parser.add_argument('--cfx', type=str, default="wachter", choices=["wachter", "proto"])
     parser.add_argument('--num_to_run', type=int, default=None, help='number of test examples to run')
-    parser.add_argument('--onehot', action='store_true', help='whether to use one-hot encoding')
     parser.add_argument('--CEfile', type=str, default=None, help='path to CE file')
     parser.add_argument('--isCEfile', type=str, default=None, help='path to file specifying whether CE is real or not')
 
-    parser.add_argument('--epsilon', type=float, default=1e-2, help='epsilon for IBP')
-    parser.add_argument('--bias_epsilon', type=float, default=1e-1, help='bias epsilon for IBP')
-    args = parser.parse_args()
+    parser.add_argument('--onehot', action='store_true', help='whether to use one-hot encoding')
+    parser.add_argument('--proto_theta', type=float, default=100, help='theta for proto')
+    parser.add_argument('--wachter_max_iter', type=int, default=100, help='max iter for wachter')
+    parser.add_argument('--wachter_lam_init', type=float, default=1e-3, help='initial lambda for wachter')
+    parser.add_argument('--wachter_max_lam_steps', type=int, default=10, help='max lambda steps for wachter')
 
-    assert args.cfx in ["wachter", "proto"]
+    parser.add_argument('--epsilon', type=float, default=1e-2, help='epsilon for IBP')
+    parser.add_argument('--bias_epsilon', type=float, default=1e-3, help='bias epsilon for IBP')
+    args = parser.parse_args()
 
     main(args)

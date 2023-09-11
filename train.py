@@ -46,12 +46,13 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, cfx_method
             if not args.inc_regenerate:
                 regenerate = np.ones(len(train_data)).astype(bool)
             if cfx_method == "proto":
-                cfx_x, is_cfx = cfx_generator.run_proto(scaler=None, theta=100, onehot=onehot,
+                cfx_x, is_cfx = cfx_generator.run_proto(scaler=None, theta=args.proto_theta, onehot=onehot,
                                                         CEs=cfx_x, is_CE=is_cfx, regenerate=regenerate)
             else:
-                cfx_x, is_cfx = cfx_generator.run_wachter(scaler=None, max_iter=100,
+                cfx_x, is_cfx = cfx_generator.run_wachter(scaler=None, max_iter=args.wachter_max_iter,
                                                           CEs=cfx_x, is_CE=is_cfx, regenerate=regenerate,
-                                                          lam_init=0.001, max_lam_steps=10)
+                                                          lam_init=args.wachter_lam_init,
+                                                          max_lam_steps=args.wachter_max_lam_steps)
         model.train()
         total_loss = 0
         for batch, (X, y, idx) in enumerate(train_dataloader):
@@ -165,18 +166,29 @@ def train_standard(train_data, test_data, batch_size, dim_in, num_hiddens):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('model_name', type=str,
-                        help="filename to save the model parameters to (don't include models/ or .pt )")
+                        help="filename to save the model parameters to (don't include .pt )")
+    parser.add_argument('--save_dir', type=str, default="trained_models", help="directory to save models to")
     parser.add_argument('--model', type=str, default='IBP', help='IBP or Standard', choices=['IBP', 'Standard'])
-    parser.add_argument('--cfx', type=str, default="wachter", help="wachter or proto")
+
+    # cfx args
+    parser.add_argument('--cfx', type=str, default="wachter", help="wachter or proto", choices=["wachter", "proto"])
     parser.add_argument('--onehot', action='store_true', help='whether to use one-hot encoding')
+    parser.add_argument('--proto_theta', type=float, default=100, help='theta for proto')
+    parser.add_argument('--wachter_max_iter', type=int, default=100, help='max iter for wachter')
+    parser.add_argument('--wachter_lam_init', type=float, default=1e-3, help='initial lambda for wachter')
+    parser.add_argument('--wachter_max_lam_steps', type=int, default=10, help='max lambda steps for wachter')
+
+    # training args
     parser.add_argument('--epoch', type=int, default=50, help='number of epochs to train')
-    parser.add_argument('--cfx_generation_freq', type=int, default=20, help='frequency of CFX generation')
     parser.add_argument('--eval_freq', type=int, default=10, help='frequency of evaluation')
+
+    # IBP training args
+    parser.add_argument('--cfx_generation_freq', type=int, default=20, help='frequency of CFX generation')
     parser.add_argument('--ratio', type=float, default=0.1, help='ratio of CFX loss')
     parser.add_argument('--inc_regenerate', action='store_true',
                         help='whether to regenerate CFXs incrementally for those that are no longer CFX each time')
     parser.add_argument('--epsilon', type=float, default=1e-2, help='epsilon for IBP')
-    parser.add_argument('--bias_epsilon', type=float, default=1e-1, help='bias epsilon for IBP')
+    parser.add_argument('--bias_epsilon', type=float, default=1e-3, help='bias epsilon for IBP')
     args = parser.parse_args()
 
     torch.random.manual_seed(0)
@@ -204,4 +216,4 @@ if __name__ == '__main__':
     else:
         raise ValueError('Invalid model type. Must be IBP or Standard')
 
-    torch.save(model.state_dict(), os.path.join('models', args.model_name + '.pt'))
+    torch.save(model.state_dict(), os.path.join(args.save_dir, args.model_name + '.pt'))
