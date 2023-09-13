@@ -17,7 +17,7 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, cfx_method
               bias_epsilon=None):
     model = FNN(dim_in, 2, num_hiddens, epsilon=epsilon, bias_epsilon=bias_epsilon)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
     test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
 
@@ -114,55 +114,6 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, cfx_method
     return model
 
 
-def train_standard(train_data, test_data, batch_size, dim_in, num_hiddens):
-    model = Standard_FNN(dim_in, 2, num_hiddens)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
-    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
-    test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
-
-    @torch.no_grad()
-    def predictor(X: np.ndarray) -> np.ndarray:
-        X = torch.as_tensor(X, dtype=torch.float32)
-        with torch.no_grad():
-            ret = model.forward_point_weights_bias(X)
-            ret = F.softmax(ret, dim=1)
-            ret = ret.cpu().numpy()
-            # print(ret)
-        return ret
-
-    model.train()
-    eval_freq = args.eval_freq
-    for epoch in range(args.epoch):
-        total_loss = 0
-        for batch, (X, y, _) in enumerate(train_dataloader):
-            optimizer.zero_grad()
-            loss = model.get_loss(X, y)
-            total_loss += loss.item() * X.shape[0]
-            loss.backward()
-            optimizer.step()
-
-        if epoch % eval_freq == 0:
-            print("Epoch", str(epoch), "loss:", total_loss / len(train_data))
-
-    model.eval()
-    with torch.no_grad():
-        total_samples, correct = 0, 0
-        for X, y, _ in train_dataloader:
-            total_samples += len(X)
-            X = X.float()
-            y_pred = model.forward(X).argmax(dim=-1)
-            correct += torch.sum((y_pred == y).float()).item()
-        print("Train accuracy: ", round(correct / total_samples, 4))
-        total_samples, correct = 0, 0
-        for X, y, _ in test_dataloader:
-            total_samples += len(X)
-            X = X.float()
-            y_pred = model.forward(X).argmax(dim=-1)
-            correct += torch.sum((y_pred == y).float()).item()
-        print("Test accuracy: ", round(correct / total_samples, 4))
-    return model
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('model_name', type=str,
@@ -181,6 +132,7 @@ if __name__ == '__main__':
     # training args
     parser.add_argument('--epoch', type=int, default=50, help='number of epochs to train')
     parser.add_argument('--eval_freq', type=int, default=10, help='frequency of evaluation')
+    parser.add_argument('--lr', type=float, default=0.01, help='learning rate')
 
     # IBP training args
     parser.add_argument('--cfx_generation_freq', type=int, default=20, help='frequency of CFX generation')
@@ -208,12 +160,11 @@ if __name__ == '__main__':
     dim_in = train_data.num_features
     num_hiddens = [10, 10]
 
-    if args.model == 'IBP':
-        model = train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, args.cfx, args.onehot,
-                          epsilon=args.epsilon, bias_epsilon=args.bias_epsilon)
-    elif args.model == 'Standard':
-        model = train_standard(train_data, test_data, batch_size, dim_in, num_hiddens)
-    else:
-        raise ValueError('Invalid model type. Must be IBP or Standard')
+    if args.model == "Standard":
+        args.ratio = 0
+        args.cfx_generation_freq = args.epoch + 1  # never generate cfx
+
+    model = train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, args.cfx, args.onehot,
+                      epsilon=args.epsilon, bias_epsilon=args.bias_epsilon)
 
     torch.save(model.state_dict(), os.path.join(args.save_dir, args.model_name + '.pt'))

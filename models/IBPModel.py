@@ -12,39 +12,8 @@ class IBPModel(torch.nn.Module):
         super(IBPModel, self).__init__()
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
-
-
-class FNN(IBPModel):
-    def __init__(self, num_inputs, num_outputs, num_hiddens: list, epsilon=0.0, bias_epsilon=0.0, activation=F.relu):
-        super(FNN, self).__init__(num_inputs, num_outputs)
-        self.num_hiddens = num_hiddens
-        self.activation = activation
-        for i, num_hidden in enumerate(num_hiddens):
-            setattr(self, 'fc{}'.format(i),
-                    LinearBound(num_inputs, num_hidden, epsilon=epsilon, bias_epsilon=bias_epsilon))
-            num_inputs = num_hidden
-        self.fc_final = LinearBound(num_inputs, num_outputs, epsilon=epsilon, bias_epsilon=bias_epsilon)
-        self.epsilon = epsilon
-        self.bias_epsilon = bias_epsilon
         self.loss_func = torch.nn.BCELoss(reduce=False)
-
-    def forward_except_last(self, x):
-        for i, num_hidden in enumerate(self.num_hiddens):
-            x = getattr(self, 'fc{}'.format(i))(x)
-            x = activation(self.activation, x)
-        return x
-
-    def forward_point_weights_bias(self, x):
-        for i, num_hidden in enumerate(self.num_hiddens):
-            x = getattr(self, 'fc{}'.format(i)).forward_point_weights_bias(x)
-            x = activation(self.activation, x)
-        return self.fc_final.forward_point_weights_bias(x)
-
-    def forward(self, x):
-        x = x.float()  # necessary for Counterfactual generation to work
-        x = self.forward_except_last(x)
-        x = self.fc_final(x)
-        return x
+        self.fc_final = None  # need to be a Linear layer
 
     def get_lb_ub_bound(self, x: IntervalBoundedTensor, W, b):
         '''
@@ -52,7 +21,7 @@ class FNN(IBPModel):
         W : W_0 - W_1 where W was the 2 x m final FC layer
         b : b_0 - b_1 where b was the 2 x 1 final bias vector
 
-        returns alpha, beta, alpha', beta' s.t. 
+        returns alpha, beta, alpha', beta' s.t.
              - logits y for x satisfy y_0 - y_1 <= w * alpha + beta + b
              - logits y' for x' satisfy y'_0 - y'_1 <= w * alpha' + beta' + b
         '''
@@ -74,7 +43,7 @@ class FNN(IBPModel):
     @staticmethod
     def get_ub(k, k_1, b, b_1, w_lb, w_ub):
         '''
-        kx+b is an upper bound for Wx+b  
+        kx+b is an upper bound for Wx+b
         k_1 x' + b_1 is an upper bound for Wx'+b
         w_lb, w_ub are lower and upper bounds for W (final FC layer)
         '''
@@ -101,18 +70,18 @@ class FNN(IBPModel):
         x : data
         cfx_x : the counterfactuals for x
         is_cfx : 0 if we failed to find a CFX for x_i (i.e., cfx_x[i]=0 but should be None)
-                 1 otherwise 
+                 1 otherwise
         y : ground-truth labels for x
 
         Return a tuple:
-            - First entry: boolean tensor where each entry is 
-                - True the original prediction can be valid, i.e., the original prediction can be correct for any one 
+            - First entry: boolean tensor where each entry is
+                - True the original prediction can be valid, i.e., the original prediction can be correct for any one
                 of the parameter shifts
                 - False otherwise
                 Only used for unittests now
-            - Second entry: real-valued tensor where each entry is 
+            - Second entry: real-valued tensor where each entry is
                 - Lower bound of CFX output when x's ground truth is 0
-                - Upper bound of CFX output when x's ground truth is 1 
+                - Upper bound of CFX output when x's ground truth is 1
 
         '''
         embed_x = self.forward_except_last(x)
@@ -153,7 +122,7 @@ class FNN(IBPModel):
         output_cfx = self.forward(cfx_x)
         output_cfx = output_cfx[:, 1] + (- output_cfx[:, 0])
         can_ori_pred_valid = torch.where(y == 0, output_x[:, 0].ub >= output_x[:, 1].lb,
-                                  output_x[:, 1].ub >= output_x[:, 0].lb)
+                                         output_x[:, 1].ub >= output_x[:, 0].lb)
         return can_ori_pred_valid, torch.where(y == 0, output_cfx.lb, output_cfx.ub)
 
     def get_loss(self, x, y, cfx_x, is_cfx, lambda_ratio=1.0):
@@ -181,6 +150,38 @@ class FNN(IBPModel):
         cfx_loss = torch.where(is_real_cfx, cfx_loss, 0)
         # print(cfx_loss)
         return (ori_loss + lambda_ratio * cfx_loss).mean()
+
+
+class FNN(IBPModel):
+    def __init__(self, num_inputs, num_outputs, num_hiddens: list, epsilon=0.0, bias_epsilon=0.0, activation=F.relu):
+        super(FNN, self).__init__(num_inputs, num_outputs)
+        self.num_hiddens = num_hiddens
+        self.activation = activation
+        for i, num_hidden in enumerate(num_hiddens):
+            setattr(self, 'fc{}'.format(i),
+                    LinearBound(num_inputs, num_hidden, epsilon=epsilon, bias_epsilon=bias_epsilon))
+            num_inputs = num_hidden
+        self.fc_final = LinearBound(num_inputs, num_outputs, epsilon=epsilon, bias_epsilon=bias_epsilon)
+        self.epsilon = epsilon
+        self.bias_epsilon = bias_epsilon
+
+    def forward_except_last(self, x):
+        for i, num_hidden in enumerate(self.num_hiddens):
+            x = getattr(self, 'fc{}'.format(i))(x)
+            x = activation(self.activation, x)
+        return x
+
+    def forward_point_weights_bias(self, x):
+        for i, num_hidden in enumerate(self.num_hiddens):
+            x = getattr(self, 'fc{}'.format(i)).forward_point_weights_bias(x)
+            x = activation(self.activation, x)
+        return self.fc_final.forward_point_weights_bias(x)
+
+    def forward(self, x):
+        x = x.float()  # necessary for Counterfactual generation to work
+        x = self.forward_except_last(x)
+        x = self.fc_final(x)
+        return x
 
 
 if __name__ == '__main__':
