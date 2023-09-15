@@ -1,14 +1,16 @@
-import torch
+import pickle
 
 import torch.nn as nn
 import torch.nn.functional as F
 from auto_LiRPA import BoundedModule, BoundedParameter
 from auto_LiRPA.perturbations import *
 from utils.utilities import seed_everything, FAKE_INF, EPS
+from models.inn import Node, Interval
 
 
-class VerifyModel:
+class VerifyModel(nn.Module):
     def __init__(self, model, dummy_input):
+        super(VerifyModel, self).__init__()
         self.ori_model = model
         self.model = BoundedModule(model, dummy_input, bound_opts={
             'sparse_intermediate_bounds': False,
@@ -74,15 +76,6 @@ class VerifyModel:
             ret[key] = torch.cat(ret[key], dim=1)
 
         return ret
-
-    def train(self):
-        self.model.train()
-
-    def eval(self):
-        self.model.eval()
-
-    def parameters(self):
-        return self.model.parameters()
 
     @staticmethod
     def get_ub(k, k_1, b, b_1, w_lb, w_ub):
@@ -209,6 +202,12 @@ class VerifyModel:
         # print(cfx_loss)
         return (ori_loss + lambda_ratio * cfx_loss).mean()
 
+    def save(self, filename):
+        torch.save(self.ori_model.state_dict(), filename)
+
+    def load(self, filename):
+        self.ori_model.load_state_dict(torch.load(filename))
+
 
 class BoundedLinear(nn.Module):
     def __init__(self, input_dim, out_dim, epsilon, bias_epsilon, norm=np.inf):
@@ -281,6 +280,7 @@ class FNN(nn.Module):
     def __init__(self, num_inputs, num_outputs, num_hiddens: list, epsilon=0.0, bias_epsilon=0.0, activation=nn.ReLU,
                  dropout=0):
         super(FNN, self).__init__()
+        self.num_inputs = num_inputs
         self.num_hiddens = num_hiddens
         self.activation = activation
         self.dropout = dropout
@@ -301,6 +301,41 @@ class FNN(nn.Module):
         x = self.encoder.forward_with_noise(*x)
         x = self.final_fc.forward_with_noise(*x)
         return x
+
+    def to_Inn(self):
+        num_layers = len(self.num_hiddens) + 2  # count input and output layers
+        nodes = {}
+        nodes[0] = [Node(0, i) for i in range(self.num_inputs)]
+        for i in range(1, num_layers - 1):
+            nodes[i] = [Node(i, j) for j in range(self.num_hiddens[i - 1])]
+        # here the paper assumes the output layer has 1 node, but we have multiple nodes
+        nodes[num_layers - 1] = [Node(num_layers - 1, 0)]
+        weights = {}
+        biases = {}
+        for i in range(num_layers - 2):
+            layer = self.encoder.blocks[i].linear.linear
+            ws = layer.weight.data.numpy()
+            bs = layer.bias.data.numpy()
+            for node_from in nodes[i]:
+                for node_to in nodes[i + 1]:
+                    # round by 4 decimals
+                    w_val = round(ws[node_to.index][node_from.index], 8)
+                    weights[(node_from, node_to)] = Interval(w_val, w_val - self.epsilon, w_val + self.epsilon)
+                    b_val = round(bs[node_to.index], 8)
+                    biases[node_to] = Interval(b_val, b_val - self.bias_epsilon, b_val + self.bias_epsilon)
+
+        layer = self.final_fc.linear
+        ws = layer.weight.data.numpy()
+        bs = layer.bias.data.numpy()
+        for node_from in nodes[num_layers - 2]:
+            for node_to in nodes[num_layers - 1]:
+                # round by 4 decimals
+                w_val = round(ws[1][node_from.index] - ws[0][node_from.index], 8)
+                weights[(node_from, node_to)] = Interval(w_val, w_val - self.epsilon * 2, w_val + self.epsilon * 2)
+                b_val = round(bs[1] - bs[0], 8)
+                biases[node_to] = Interval(b_val, b_val - self.bias_epsilon * 2, b_val + self.bias_epsilon * 2)
+
+        return num_layers, nodes, weights, biases
 
 
 # class CounterNet(IBPModel):

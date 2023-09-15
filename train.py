@@ -2,19 +2,21 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 import os
+import pickle
 
 import torch.nn.functional as F
 
 from utils import dataset
 from utils import cfx
-from models.IBPModel import FNN
+from models.IBPModel import FNN, VerifyModel
 from utils.utilities import seed_everything
 
 import argparse
 
 
 def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, cfx_method, onehot, epsilon, bias_epsilon):
-    model = FNN(dim_in, 2, num_hiddens, epsilon=epsilon, bias_epsilon=bias_epsilon)
+    model_ori = FNN(dim_in, 2, num_hiddens, epsilon=epsilon, bias_epsilon=bias_epsilon)
+    model = VerifyModel(model_ori, dummy_input=torch.tensor(train_data.X[:2]))
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
@@ -61,7 +63,7 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, cfx_method
             else:
                 this_cfx = cfx_x[idx]
                 this_is_cfx = is_cfx[idx]
-                loss = model.get_loss(X, y, this_cfx, this_is_cfx, args.ratio)
+                loss = model.get_loss(X, y, this_cfx, this_is_cfx, args.ratio, args.tightness)
             total_loss += loss.item() * X.shape[0]
             loss.backward()
             optimizer.step()
@@ -122,7 +124,8 @@ if __name__ == '__main__':
     parser.add_argument('model_name', type=str,
                         help="filename to save the model parameters to (don't include .pt )")
     parser.add_argument('--save_dir', type=str, default="trained_models", help="directory to save models to")
-    parser.add_argument('--model', type=str, default='IBP', help='IBP or Standard', choices=['IBP', 'Standard'])
+    parser.add_argument('--model', type=str, default=None, help='IBP or Standard', choices=['IBP', 'Standard'])
+    parser.add_argument('--seed', type=int, default=0, help='random seed')
 
     # cfx args
     parser.add_argument('--cfx', type=str, default="wachter", help="wachter or proto",
@@ -141,12 +144,15 @@ if __name__ == '__main__':
     # IBP training args
     parser.add_argument('--cfx_generation_freq', type=int, default=20, help='frequency of CFX generation')
     parser.add_argument('--ratio', type=float, default=0.1, help='ratio of CFX loss')
+    parser.add_argument('--tightness', choices=["ours", "ibp", "crownibp"], default="ours",
+                        help='the tightness of the bound')
     parser.add_argument('--inc_regenerate', action='store_true',
                         help='whether to regenerate CFXs incrementally for those that are no longer CFX each time')
     parser.add_argument('--epsilon', type=float, default=1e-2, help='epsilon for IBP')
     parser.add_argument('--bias_epsilon', type=float, default=1e-3, help='bias epsilon for IBP')
-    parser.add_argument('--seed', type=int, default=0, help='random seed')
     args = parser.parse_args()
+    if not os.path.exists(args.save_dir):
+        os.makedirs(args.save_dir)
 
     seed_everything(args.seed)
 
@@ -176,4 +182,5 @@ if __name__ == '__main__':
         model = train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, args.cfx, args.onehot,
                           args.epsilon, args.bias_epsilon)
 
-    torch.save(model.state_dict(), os.path.join(args.save_dir, args.model_name + '.pt'))
+    model.save(os.path.join(args.save_dir, args.model_name + ".pt"))
+    # model.load(os.path.join(args.save_dir, args.model_name))

@@ -7,7 +7,7 @@ import os
 import argparse
 
 from models.inn import Inn
-from models.IBPModel import FNN
+from models.IBPModel import FNN, VerifyModel
 from utils import cfx
 from utils import dataset
 from utils.cfx_evaluator import CFXEvaluator
@@ -66,10 +66,11 @@ def main(args):
 
     num_hiddens = [10, 10]
 
-    model = FNN(dim_in, 2, num_hiddens, epsilon=args.epsilon, bias_epsilon=args.bias_epsilon)
-    model.load_state_dict(torch.load(os.path.join(args.save_dir, args.model)))
+    model_ori = FNN(dim_in, 2, num_hiddens, epsilon=args.epsilon, bias_epsilon=args.bias_epsilon)
+    model = VerifyModel(model_ori, dummy_input=torch.tensor(train_data.X[:2]))
+    model.load(os.path.join(args.save_dir, args.model))
     model.eval()
-    inn = Inn.from_IBPModel(model)
+    inn = Inn.from_IBPModel(model.ori_model)
 
     if not os.path.exists(args.cfx_filename):
         cfx_x, is_cfx = create_CFX(args, model, minmax, train_data, test_data, num_hiddens)

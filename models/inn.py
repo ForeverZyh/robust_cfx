@@ -1,6 +1,3 @@
-from models import IBPModel
-
-
 class Interval:
     def __init__(self, value, lb=0, ub=0):
         self.value = value
@@ -44,39 +41,8 @@ class Inn:
         self.biases = biases
 
     @classmethod
-    def from_IBPModel(cls, model: IBPModel):
-        num_layers = len(model.num_hiddens) + 2  # count input and output layers
+    def from_IBPModel(cls, model):
         delta = model.epsilon
         bias_delta = model.bias_epsilon
-        nodes = {}
-        nodes[0] = [Node(0, i) for i in range(model.num_inputs)]
-        for i in range(1, num_layers - 1):
-            nodes[i] = [Node(i, j) for j in range(model.num_hiddens[i - 1])]
-        # here the paper assumes the output layer has 1 node, but we have multiple nodes
-        nodes[num_layers - 1] = [Node(num_layers - 1, 0)]
-        weights = {}
-        biases = {}
-        for i in range(num_layers - 2):
-            layer = getattr(model, 'fc{}'.format(i)).linear
-            ws = layer.weight.data.numpy()
-            bs = layer.bias.data.numpy()
-            for node_from in nodes[i]:
-                for node_to in nodes[i + 1]:
-                    # round by 4 decimals
-                    w_val = round(ws[node_to.index][node_from.index], 8)
-                    weights[(node_from, node_to)] = Interval(w_val, w_val - delta, w_val + delta)
-                    b_val = round(bs[node_to.index], 8)
-                    biases[node_to] = Interval(b_val, b_val - bias_delta, b_val + bias_delta)
-
-        layer = getattr(model, 'fc_final').linear
-        ws = layer.weight.data.numpy()
-        bs = layer.bias.data.numpy()
-        for node_from in nodes[num_layers - 2]:
-            for node_to in nodes[num_layers - 1]:
-                # round by 4 decimals
-                w_val = round(ws[1][node_from.index] - ws[0][node_from.index], 8)
-                weights[(node_from, node_to)] = Interval(w_val, w_val - delta * 2, w_val + delta * 2)
-                b_val = round(bs[1] - bs[0], 8)
-                biases[node_to] = Interval(b_val, b_val - bias_delta * 2, b_val + bias_delta * 2)
-
+        num_layers, nodes, weights, biases = model.to_Inn()
         return cls(num_layers, delta, bias_delta, nodes, weights, biases)

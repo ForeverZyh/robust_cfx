@@ -3,14 +3,13 @@ from sklearn.neighbors import NearestNeighbors
 import numpy as np
 
 from models.inn import Inn
-from models.IBPModel import IBPModel
 from utils.dataset import Custom_Dataset
 from utils import optsolver
 from utils.utilities import TOLERANCE
 
 
 class CFXEvaluator:
-    def __init__(self, cfx_x, is_cfx, model_ori: IBPModel, model_shift: IBPModel, train_data: Custom_Dataset,
+    def __init__(self, cfx_x, is_cfx, model_ori, model_shift, train_data: Custom_Dataset,
                  test_data: Custom_Dataset, inn: Inn, log_file):
         self.cfx_x = cfx_x
         self.is_cfx = is_cfx
