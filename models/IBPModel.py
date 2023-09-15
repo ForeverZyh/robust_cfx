@@ -1,51 +1,93 @@
 import torch
 
-from models.ibp import LinearBound, activation, IntervalBoundedTensor, sum
+import torch.nn as nn
 import torch.nn.functional as F
+from auto_LiRPA import BoundedModule, BoundedParameter
+from auto_LiRPA.perturbations import *
+from utils.utilities import seed_everything, FAKE_INF, EPS
 
-FAKE_INF = 10
-EPS = 1e-8
 
+class VerifyModel:
+    def __init__(self, model, dummy_input):
+        self.ori_model = model
+        self.model = BoundedModule(model, dummy_input, bound_opts={
+            'sparse_intermediate_bounds': False,
+            'sparse_conv_intermediate_bounds': False,
+            'sparse_intermediate_bounds_with_ibp': False})
+        self.final_node = self.model.final_name
+        self.root_nodes = set(self.model.root_names)
+        self.loss_func = nn.BCELoss()
 
-class IBPModel(torch.nn.Module):
-    def __init__(self, num_inputs, num_outputs):
-        super(IBPModel, self).__init__()
-        self.num_inputs = num_inputs
-        self.num_outputs = num_outputs
-        self.loss_func = torch.nn.BCELoss(reduce=False)
-        self.fc_final = None  # need to be a Linear layer
+    def forward_point_weights_bias(self, x):
+        return self.model.forward(x)
 
-    def get_lb_ub_bound(self, x: IntervalBoundedTensor, W, b):
-        '''
-        x : embedding of data (all layers except last FC layer). Dimension m x 1
-        W : W_0 - W_1 where W was the 2 x m final FC layer
-        b : b_0 - b_1 where b was the 2 x 1 final bias vector
+    def forward_IBP(self, x, forward_first=False):
+        """
+        :param x: the input
+        :param forward_first: True or False, if True, then forward the input before IBP, otherwise, directly call IBP
+        The IBP is required to be called after the forward pass during training.
+        However, in most cases, the self.forward() is already called before IBP, so we can skip the forward pass in IBP
+        :return: the lower and upper bound for the output
+        """
+        c = torch.tensor([[[-1, 1]] for _ in range(x.shape[0])]).float()
+        if forward_first:
+            _ = self.model.forward(x)
+            return self.model(method_opt="compute_bounds", C=c, method="IBP", final_node_name=None, no_replicas=True)
+        return self.model(x=(x,), method_opt="compute_bounds", C=c, method="IBP", final_node_name=None,
+                          no_replicas=True)
 
-        returns alpha, beta, alpha', beta' s.t.
-             - logits y for x satisfy y_0 - y_1 <= w * alpha + beta + b
-             - logits y' for x' satisfy y'_0 - y'_1 <= w * alpha' + beta' + b
-        '''
-        # Add/subtract 2eps because we have to account for eps for each W_0 and W_1
-        W_lb = W - self.epsilon * 2
-        W_ub = W + self.epsilon * 2
+    def forward_CROWN_IBP(self, x, return_A, forward_IBP_first=False, forward_first=False):
+        """
+        :param x: the input
+        :param return_A: whether to return lA and uA
+        A[node_1]=set(list(node_2)) compute the A matrix for node_1 with respect to node_2
+        :param forward_IBP_first: True or False, if True, then forward with IBP the input before CROWN_IBP;
+         otherwise, directly call CROWN_IBP
+        :param forward_first: True or False, if True, then forward the input before IBP, otherwise, directly call IBP
+        :return:
+        """
+        if forward_IBP_first:
+            _ = self.forward_IBP(x, forward_first=forward_first)
+        c = torch.tensor([[[-1, 1]] for _ in range(x.shape[0])]).float()
+        return self.model(method_opt="compute_bounds", C=c, method="CROWN-IBP",
+                          bound_lower=True, bound_upper=True, final_node_name=None, average_A=True,
+                          no_replicas=True, return_A=return_A, needed_A_dict={self.final_node: self.root_nodes})
 
-        left_end_points = x * W_lb  # range of Wx when W is minimized
-        right_end_points = x * W_ub
+    def smash_A(self, A_dict):
+        """
+        Smash the A dict into a vector
+        """
+        ret = {"lA": [], "lW": [], "uA": [], "uW": [], "lbias": 0, "ubias": 0}
+        A_dict = A_dict[self.final_node]
+        for node in self.model.nodes():
+            if node.name in A_dict:
+                batch_size = A_dict[node.name]['lA'].shape[0]
+                ret["lA"].append(A_dict[node.name]['lA'].view(batch_size, -1))
+                ret["lW"].append(node.lower.view(1, -1))
+                ret["uA"].append(A_dict[node.name]['uA'].view(batch_size, -1))
+                ret["uW"].append(node.upper.view(1, -1))
+                # they are the same across all nodes.
+                ret["lbias"] = A_dict[node.name]['lbias']
+                ret["ubias"] = A_dict[node.name]['ubias']
 
-        def get_k_and_b(left, right, b_):
-            k = (right - left) / (self.epsilon * 4)
-            b = left - k * W_lb
-            return k, b.sum(dim=-1) + b_
+        for key in ["lA", "lW", "uA", "uW"]:
+            ret[key] = torch.cat(ret[key], dim=1)
 
-        return get_k_and_b(left_end_points.lb, right_end_points.lb, b - self.bias_epsilon * 2), \
-               get_k_and_b(left_end_points.ub, right_end_points.ub, b + self.bias_epsilon * 2)
+        return ret
+
+    def train(self):
+        self.model.train()
+
+    def eval(self):
+        self.model.eval()
+
+    def parameters(self):
+        return self.model.parameters()
 
     @staticmethod
     def get_ub(k, k_1, b, b_1, w_lb, w_ub):
         '''
-        kx+b is an upper bound for Wx+b
-        k_1 x' + b_1 is an upper bound for Wx'+b
-        w_lb, w_ub are lower and upper bounds for W (final FC layer)
+        return max(k_1 w + b_1) subject to k w + b >= 0, for w in [w_lb, w_ub]
         '''
         w_ret = torch.where((k < 0) | ((k == 0) & (k_1 < 0)), w_lb, w_ub)
         ret = torch.sum(w_ret * k_1, dim=-1) + b_1
@@ -65,12 +107,10 @@ class IBPModel(torch.nn.Module):
         ret = ret + torch.sum(t_1_delta * percent, dim=-1)
         return torch.where(t >= 0, ret, -FAKE_INF)
 
-    def get_diffs_binary(self, x, cfx_x, y):
+    def get_diffs_binary(self, x, cfx_x, y, forward_first=False):
         '''
         x : data
         cfx_x : the counterfactuals for x
-        is_cfx : 0 if we failed to find a CFX for x_i (i.e., cfx_x[i]=0 but should be None)
-                 1 otherwise
         y : ground-truth labels for x
 
         Return a tuple:
@@ -84,53 +124,66 @@ class IBPModel(torch.nn.Module):
                 - Upper bound of CFX output when x's ground truth is 1
 
         '''
-        embed_x = self.forward_except_last(x)
-        embed_cfx_x = self.forward_except_last(cfx_x)
-        # so we can write logits y_0-y_1 = y_final_weights * embed_x + y_final_bias
-        y_final_weights = self.fc_final.linear.weight[1, :] - self.fc_final.linear.weight[0, :]
-        y_final_bias = self.fc_final.linear.bias[1] - self.fc_final.linear.bias[0]
-        (alpha_k, alpha_b), (beta_k, beta_b) = self.get_lb_ub_bound(embed_x, y_final_weights, y_final_bias)
-        y_final_weights_ub = y_final_weights + 2 * self.epsilon
-        y_final_weights_lb = y_final_weights - 2 * self.epsilon
-        (alpha_k_1, alpha_b_1), (beta_k_1, beta_b_1) = self.get_lb_ub_bound(embed_cfx_x, y_final_weights, y_final_bias)
-        cfx_output_lb = -self.get_ub(-alpha_k, -alpha_k_1, -alpha_b, -alpha_b_1, y_final_weights_lb,
-                                     y_final_weights_ub)
-        cfx_output_ub = self.get_ub(beta_k, beta_k_1, beta_b, beta_b_1, y_final_weights_lb,
-                                    y_final_weights_ub)
-        # print(torch.any(beta_k * beta_k_1 < 0))
-        # print(torch.any(alpha_k * alpha_k_1 < 0))
-        can_ori_pred_valid = torch.where(y == 0, cfx_output_lb <= 0, cfx_output_ub >= 0)
+        ilb, iub = self.forward_IBP(x, forward_first=forward_first)
+        lb, ub, ret_A = self.forward_CROWN_IBP(x, forward_first=forward_first, return_A=True)
+        iclb, icub = self.forward_IBP(cfx_x, forward_first=forward_first)
+        clb, cub, ret_cA = self.forward_CROWN_IBP(cfx_x, forward_first=forward_first, return_A=True)
+        lb = torch.max(ilb, lb)  # CROWN-IBP is not guaranteed to be tighter than IBP
+        ub = torch.min(iub, ub)
+        clb = torch.max(iclb, clb)
+        cub = torch.min(icub, cub)
 
-        return can_ori_pred_valid, torch.where(y == 0, cfx_output_lb, cfx_output_ub)
+        lb = lb.squeeze(-1)
+        ub = ub.squeeze(-1)
+        clb = clb.squeeze(-1)
+        cub = cub.squeeze(-1)
 
-    def get_diffs_binary_crownibp(self, x, cfx_x, y):
-        embed_x = self.forward_except_last(x)
-        embed_cfx_x = self.forward_except_last(cfx_x)
-        y_final_weights = self.fc_final.linear.weight[1, :] - self.fc_final.linear.weight[0, :]
-        y_final_weights = IntervalBoundedTensor(y_final_weights, y_final_weights - 2 * self.epsilon,
-                                                y_final_weights + 2 * self.epsilon)
-        y_final_bias = self.fc_final.linear.bias[1] - self.fc_final.linear.bias[0]
-        y_final_bias = IntervalBoundedTensor(y_final_bias, y_final_bias - 2 * self.bias_epsilon,
-                                             y_final_bias + 2 * self.bias_epsilon)
-        output_x = sum(embed_x * y_final_weights, dim=-1) + y_final_bias
-        output_cfx = sum(embed_cfx_x * y_final_weights, dim=-1) + y_final_bias
-        can_ori_pred_valid = torch.where(y == 0, output_x.lb <= 0, output_x.ub >= 0)
-        return can_ori_pred_valid, torch.where(y == 0, output_cfx.lb, output_cfx.ub)
+        ret_A = self.smash_A(ret_A)
+        ret_cA = self.smash_A(ret_cA)
+        cfx_output_lb = -self.get_ub(-ret_A["lA"], -ret_cA["lA"], -ret_A["lbias"].view(-1), -ret_cA["lbias"].view(-1),
+                                     ret_A["lW"], ret_A["uW"])
+        cfx_output_ub = self.get_ub(ret_A["uA"], ret_cA["uA"], ret_A["ubias"].view(-1), ret_cA["ubias"].view(-1),
+                                    ret_A["lW"], ret_A["uW"])
+        cfx_output_lb = torch.max(cfx_output_lb, clb)
+        cfx_output_ub = torch.min(cfx_output_ub, cub)
+        can_cfx_pred_invalid = torch.where(y == 0, (lb <= 0) & (cfx_output_lb <= 0), (ub > 0) & (cfx_output_ub > 0))
 
-    def get_diffs_binary_ibp(self, x, cfx_x, y):
-        output_x = self.forward(x)
-        output_cfx = self.forward(cfx_x)
-        output_cfx = output_cfx[:, 1] + (- output_cfx[:, 0])
-        can_ori_pred_valid = torch.where(y == 0, output_x[:, 0].ub >= output_x[:, 1].lb,
-                                         output_x[:, 1].ub >= output_x[:, 0].lb)
-        return can_ori_pred_valid, torch.where(y == 0, output_cfx.lb, output_cfx.ub)
+        return can_cfx_pred_invalid, torch.where(y == 0, cfx_output_lb, cfx_output_ub)
 
-    def get_loss(self, x, y, cfx_x, is_cfx, lambda_ratio=1.0):
+    def get_diffs_binary_crownibp(self, x, cfx_x, y, forward_first=False):
+        ilb, iub = self.forward_IBP(x, forward_first=forward_first)
+        lb, ub = self.forward_CROWN_IBP(x, return_A=False)
+        iclb, icub = self.forward_IBP(cfx_x, forward_first=forward_first)
+        clb, cub = self.forward_CROWN_IBP(cfx_x, return_A=False)
+        lb = torch.max(ilb, lb)  # CROWN-IBP is not guaranteed to be tighter than IBP
+        ub = torch.min(iub, ub)
+        clb = torch.max(iclb, clb)
+        cub = torch.min(icub, cub)
+
+        lb = lb.squeeze(-1)
+        ub = ub.squeeze(-1)
+        clb = clb.squeeze(-1)
+        cub = cub.squeeze(-1)
+        can_cfx_pred_invalid = torch.where(y == 0, (lb <= 0) & (clb <= 0), (ub > 0) & (cub > 0))
+        return can_cfx_pred_invalid, torch.where(y == 0, clb, cub)
+
+    def get_diffs_binary_ibp(self, x, cfx_x, y, forward_first=False):
+        lb, ub = self.forward_IBP(x, forward_first=forward_first)
+        clb, cub = self.forward_IBP(cfx_x, forward_first=forward_first)
+        lb = lb.squeeze(-1)
+        ub = ub.squeeze(-1)
+        clb = clb.squeeze(-1)
+        cub = cub.squeeze(-1)
+        can_cfx_pred_invalid = torch.where(y == 0, (lb <= 0) & (clb <= 0), (ub > 0) & (cub > 0))
+        return can_cfx_pred_invalid, torch.where(y == 0, clb, cub)
+
+    def get_loss(self, x, y, cfx_x, is_cfx, lambda_ratio=1.0, loss_type="ours"):
         '''
             x is data
             y is ground-truth label
         '''
         # convert x to float32
+        assert loss_type in ["ours", "ibp", "crownibp"]
         x = x.float()
         ori_output = self.forward_point_weights_bias(x)
         # print(ori_output)
@@ -140,9 +193,14 @@ class IBPModel(torch.nn.Module):
             return ori_loss.mean()
         # print(ori_loss)
 
-        _, cfx_output = self.get_diffs_binary(x, cfx_x, y)
+        if loss_type == "ours":
+            _, cfx_output = self.get_diffs_binary(x, cfx_x, y)
+        elif loss_type == "ibp":
+            _, cfx_output = self.get_diffs_binary_ibp(x, cfx_x, y)
+        elif loss_type == "crownibp":
+            _, cfx_output = self.get_diffs_binary_crownibp(x, cfx_x, y)
         # if the cfx is valid and the original prediction is correct, then we use the cfx loss
-        is_real_cfx = is_cfx & torch.where(y == 0, ori_output < 0.5, ori_output >= 0.5)
+        is_real_cfx = is_cfx & torch.where(y == 0, ori_output <= 0.5, ori_output > 0.5)
         # print(is_real_cfx, cfx_output)
         cfx_output = torch.sigmoid(cfx_output)
         cfx_loss = self.loss_func(cfx_output, 1.0 - y)
@@ -152,43 +210,116 @@ class IBPModel(torch.nn.Module):
         return (ori_loss + lambda_ratio * cfx_loss).mean()
 
 
-class FNN(IBPModel):
-    def __init__(self, num_inputs, num_outputs, num_hiddens: list, epsilon=0.0, bias_epsilon=0.0, activation=F.relu):
-        super(FNN, self).__init__(num_inputs, num_outputs)
+class BoundedLinear(nn.Module):
+    def __init__(self, input_dim, out_dim, epsilon, bias_epsilon, norm=np.inf):
+        super(BoundedLinear, self).__init__()
+        self.epsilon = epsilon
+        self.bias_epsilon = bias_epsilon
+        self.ptb_weight = PerturbationLpNorm(norm=norm, eps=epsilon)
+        self.ptb_bias = PerturbationLpNorm(norm=norm, eps=bias_epsilon)
+        self.linear = nn.Linear(input_dim, out_dim)
+        self.linear.weight = BoundedParameter(self.linear.weight.data, self.ptb_weight)
+        self.linear.bias = BoundedParameter(self.linear.bias.data, self.ptb_bias)
+
+    def forward(self, x):
+        return self.linear(x)
+
+    def forward_with_noise(self, x, cfx):
+        # only for test use
+        layer = self.linear
+        weights = layer.weight.data + (
+                0.5 - torch.rand(layer.weight.data.shape)) * 2 * self.epsilon
+        bias = layer.bias.data + (
+                0.5 - torch.rand(layer.bias.data.shape)) * 2 * self.bias_epsilon
+        x = F.linear(x, weights, bias)
+        cfx = F.linear(cfx, weights, bias)
+        return x, cfx
+
+
+class LinearBlock(nn.Module):
+    def __init__(self, input_dim, out_dim, epsilon, bias_epsilon, activation, dropout):
+        super().__init__()
+        self.linear = BoundedLinear(input_dim, out_dim, epsilon, bias_epsilon)
+        if dropout == 0:
+            self.block = activation()
+        else:
+            self.block = nn.Sequential(
+                activation(),
+                nn.Dropout(dropout),
+            )
+
+    def forward(self, x):
+        x = self.linear(x)
+        return self.block(x)
+
+    def forward_with_noise(self, x, cfx):
+        x, cfx = self.linear.forward_with_noise(x, cfx)
+        return self.block(x), self.block(cfx)
+
+
+class MultilayerPerception(nn.Module):
+    def __init__(self, dims, epsilon, bias_epsilon, activation, dropout):
+        super().__init__()
+        layers = []
+        num_blocks = len(dims)
+        self.blocks = []
+        for i in range(1, num_blocks):
+            self.blocks.append(LinearBlock(dims[i - 1], dims[i], epsilon, bias_epsilon, activation, dropout=dropout))
+        self.model = nn.Sequential(*self.blocks)
+
+    def forward(self, x):
+        return self.model(x)
+
+    def forward_with_noise(self, x, cfx_x):
+        x = x, cfx_x
+        for block in self.blocks:
+            x = block.forward_with_noise(*x)
+        return x
+
+
+class FNN(nn.Module):
+    def __init__(self, num_inputs, num_outputs, num_hiddens: list, epsilon=0.0, bias_epsilon=0.0, activation=nn.ReLU,
+                 dropout=0):
+        super(FNN, self).__init__()
         self.num_hiddens = num_hiddens
         self.activation = activation
-        for i, num_hidden in enumerate(num_hiddens):
-            setattr(self, 'fc{}'.format(i),
-                    LinearBound(num_inputs, num_hidden, epsilon=epsilon, bias_epsilon=bias_epsilon))
-            num_inputs = num_hidden
-        self.fc_final = LinearBound(num_inputs, num_outputs, epsilon=epsilon, bias_epsilon=bias_epsilon)
+        self.dropout = dropout
+        dims = [num_inputs] + num_hiddens
+        self.encoder = MultilayerPerception(dims, epsilon, bias_epsilon, activation, dropout=dropout)
+        self.final_fc = BoundedLinear(num_hiddens[-1], num_outputs, epsilon, bias_epsilon)
         self.epsilon = epsilon
         self.bias_epsilon = bias_epsilon
 
-    def forward_except_last(self, x):
-        for i, num_hidden in enumerate(self.num_hiddens):
-            x = getattr(self, 'fc{}'.format(i))(x)
-            x = activation(self.activation, x)
-        return x
-
-    def forward_point_weights_bias(self, x):
-        for i, num_hidden in enumerate(self.num_hiddens):
-            x = getattr(self, 'fc{}'.format(i)).forward_point_weights_bias(x)
-            x = activation(self.activation, x)
-        return self.fc_final.forward_point_weights_bias(x)
-
     def forward(self, x):
         x = x.float()  # necessary for Counterfactual generation to work
-        x = self.forward_except_last(x)
-        x = self.fc_final(x)
+        x = self.encoder(x)
+        x = self.final_fc(x)
+        return x
+
+    def forward_with_noise(self, x, cfx_x):
+        x = x.float(), cfx_x.float()
+        x = self.encoder.forward_with_noise(*x)
+        x = self.final_fc.forward_with_noise(*x)
         return x
 
 
+# class CounterNet(IBPModel):
+#     def __init__(self, num_inputs, num_outputs, num_hiddens: list, epsilon=0.0, bias_epsilon=0.0, activation=F.relu):
+#         super(CounterNet, self).__init__(num_inputs, num_outputs)
+#         self.encoder_net = FNN(num_inputs, num_outputs, num_hiddens, epsilon, bias_epsilon, activation)
+#
+#     def forward_except_last(self, x):
+#         return self.encoder_net.forward_except_last(x)
+#
+#     def forward_point_weights_bias(self, x):
+#         return self.forward_point_weights_bias(x)
+#
+
 if __name__ == '__main__':
-    torch.random.manual_seed(0)
+    seed_everything(0)
     batch_size = 100
     dim_in = 2
-    model = FNN(dim_in, 2, [2, 4], epsilon=1e-2, bias_epsilon=1e-1)
+    model_ori = FNN(dim_in, 2, [2, 4], epsilon=1e-1, bias_epsilon=1e-2, activation=lambda: nn.LeakyReLU(0.1))
     x = torch.normal(0, 0.2, (batch_size, dim_in))
     x[:batch_size // 2, 0] = x[:batch_size // 2, 0] + 2
     cfx_x = x + torch.normal(0, 0.2, x.shape)
@@ -200,12 +331,13 @@ if __name__ == '__main__':
     print(f"CFX of the above points Centered at (1, -1) with label {(1 - y[0]).long().item()}", cfx_x[:5])
     print(f"Centered at (0, 0) with label {y[-1].long().item()}", x[-5:])
     print(f"CFX of the above points Centered at (1, 1) with label {(1 - y[-1]).long().item()}", cfx_x[-5:])
+    model = VerifyModel(model_ori, x[2:])
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
     for epoch in range(500):
         optimizer.zero_grad()
         loss = model.get_loss(x, y, cfx_x, torch.ones(cfx_x.shape[0]).bool(),
-                              0.1)  # change lambda_ratio to 0.0 results in low CFX accuracy.
+                              0.1, loss_type="ours")  # change lambda_ratio to 0.0 results in low CFX accuracy.
         loss.backward()
         optimizer.step()
         if epoch % 100 == 0:

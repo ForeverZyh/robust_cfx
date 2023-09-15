@@ -6,8 +6,7 @@ from models.inn import Inn
 from models.IBPModel import IBPModel
 from utils.dataset import Custom_Dataset
 from utils import optsolver
-
-EPS = 1e-2
+from utils.utilities import TOLERANCE
 
 
 class CFXEvaluator:
@@ -64,7 +63,7 @@ class CFXEvaluator:
             if is_cfx_:
                 solver = optsolver.OptSolver(self.test_data, self.inn, 1 - y, x, mode=1, x_prime=cfx_x_)
                 res, bound = solver.compute_inn_bounds()
-                if bound is not None and abs(bound - loose_bound.item()) > EPS:
+                if bound is not None and abs(bound - loose_bound.item()) > TOLERANCE:
                     solver_bound_better += 1
                 if res == 1:
                     solver_robust_cnt += 1
@@ -79,7 +78,7 @@ class CFXEvaluator:
         for i, (x, cfx_x_, is_cfx_) in enumerate(zip(self.test_data.X, self.cfx_x, is_cfx)):
             if is_cfx_:
                 proximity += torch.norm(torch.tensor(x) - cfx_x_, p=1).item() / len(x)
-                sparsity += torch.sum(torch.abs(torch.tensor(x) - cfx_x_) > EPS).item() / len(x)
+                sparsity += torch.sum(torch.abs(torch.tensor(x) - cfx_x_) > TOLERANCE).item() / len(x)
         proximity /= total_cor
         sparsity /= total_cor
         ret += f"Proximity: {round(proximity, 4)}\n"

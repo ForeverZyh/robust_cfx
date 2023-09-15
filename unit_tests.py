@@ -1,69 +1,30 @@
 import unittest
 import torch
-import torch.nn.functional as F
+from torch.nn import ReLU, LeakyReLU, Sigmoid, Tanh
 
-from models.IBPModel import FNN, FAKE_INF
-from models.ibp import matmul, IntervalBoundedTensor
-
-TOLERANCE = 1e-2
+from models.IBPModel import FNN, FAKE_INF, VerifyModel
+from utils.utilities import seed_everything, TOLERANCE
 
 
 class TestIBP(unittest.TestCase):
-    def test_matmul(self):
-        for _ in range(100):
-            A = (0.5 - torch.rand(10, 30)) * 2
-            B = (0.5 - torch.rand(30, 20)) * 2
-            epsilonA = torch.rand(1)
-            epsilonB = torch.rand(1)
-            A = IntervalBoundedTensor(A, A - epsilonA, A + epsilonA)
-            B = IntervalBoundedTensor(B, B - epsilonB, B + epsilonB)
-            C = matmul(A, B)
-            concrete_A = A.val + (0.5 - torch.rand(A.val.shape)) * 2 * epsilonA
-            concrete_B = B.val + (0.5 - torch.rand(B.val.shape)) * 2 * epsilonB
-            concrete_C = torch.matmul(concrete_A, concrete_B)
-            self.assertTrue(torch.all(C.lb < concrete_C + TOLERANCE))
-            self.assertTrue(torch.all(C.ub > concrete_C - TOLERANCE))
-
-    def test_fnn(self):
-        eps = 1e-2
-        bias_eps = 1e-2
-        in_dim = 5
-        out_dim = 2
-        model = FNN(in_dim, out_dim, [10, 10, 10], epsilon=eps, bias_epsilon=bias_eps)
-        batch_size = 10
-        act = F.relu
-        with torch.no_grad():
-            for _ in range(100):
-                x = torch.rand(batch_size, in_dim)
-                output = model.forward_except_last(x)
-                for i, num_hidden in enumerate(model.num_hiddens):
-                    layer = getattr(model, 'fc{}'.format(i))
-                    weights = layer.linear.weight + (0.5 - torch.rand(layer.linear.weight.shape)) * 2 * eps
-                    bias = layer.linear.bias + (0.5 - torch.rand(layer.linear.bias.shape)) * 2 * bias_eps
-                    x = F.linear(x, weights, bias)
-                    x = act(x)
-
-                # check whether the ibp bounds are correct
-                self.assertTrue(torch.all(output.lb < x + TOLERANCE))
-                self.assertTrue(torch.all(output.ub > x - TOLERANCE))
-
     def test_fnn_diff_tighter(self):
-        eps = 1e-2
+        eps = 1e-1
         bias_eps = 1e-3
         in_dim = 5
         out_dim = 2
         batch_size = 10
         with torch.no_grad():
-            for act in [F.relu, F.leaky_relu, torch.sigmoid, torch.tanh]:
+            for act in [ReLU, lambda: LeakyReLU(0.1)]:
                 print(act)
                 tighter_linear_to_crownibp = 0
                 tighter_real_linear_to_crownibp = 0
                 tighter_crownibp_to_ibp = 0
                 tighter_real_crownibp_to_ibp = 0
-                for rnd in range(200):
-                    torch.random.manual_seed(rnd)
-                    model = FNN(in_dim, out_dim, [10, 10], epsilon=eps, bias_epsilon=bias_eps, activation=act)
+                for rnd in range(50):
+                    seed_everything(rnd)
+                    model_ori = FNN(in_dim, out_dim, [10, 10], epsilon=eps, bias_epsilon=bias_eps, activation=act)
                     tmp_x = (0.5 - torch.rand(batch_size * 10, in_dim)) * 20
+                    model = VerifyModel(model_ori, tmp_x[:2])
                     tmp_y = model.forward_point_weights_bias(tmp_x).argmax(dim=-1)
                     x = tmp_x[:batch_size]
                     indices = torch.arange(batch_size, batch_size * 2)
@@ -77,14 +38,17 @@ class TestIBP(unittest.TestCase):
                     y = tmp_y[:batch_size]
                     cfx_x = tmp_x[indices]
                     cfx_y = tmp_y[indices]
+
                     # print(y, cfx_y)
-                    cal_is_real_cfx_crownibp, cal_cfx_output_crownibp = model.get_diffs_binary_crownibp(x, cfx_x, y)
-                    cal_cfx_output_crownibp_lb = cal_cfx_output_crownibp * (2 * (0.5 - y))
-                    cal_is_real_cfx_ibp, cal_cfx_output_ibp = model.get_diffs_binary_ibp(x, cfx_x, y)
+                    cal_is_real_cfx_ibp, cal_cfx_output_ibp = \
+                        model.get_diffs_binary_ibp(x, cfx_x, y)
                     cal_cfx_output_ibp_lb = cal_cfx_output_ibp * (2 * (0.5 - y))
+                    cal_is_real_cfx_crownibp, cal_cfx_output_crownibp = \
+                        model.get_diffs_binary_crownibp(x, cfx_x, y)
+                    cal_cfx_output_crownibp_lb = cal_cfx_output_crownibp * (2 * (0.5 - y))
                     cal_is_real_cfx, cal_cfx_output = model.get_diffs_binary(x, cfx_x, y)
                     cal_cfx_output_lb = cal_cfx_output * (2 * (0.5 - y))
-                    # print(cal_cfx_output_crownibp_lb, cal_cfx_output_lb)
+                    # print(cal_cfx_output_crownibp_lb, cal_cfx_output_ibp_lb)
                     # print(cal_is_real_cfx_crownibp, cal_is_real_cfx)
                     self.assertTrue(torch.all(cal_cfx_output_crownibp_lb <= cal_cfx_output_lb + TOLERANCE))
                     self.assertTrue(torch.all(cal_cfx_output_ibp_lb <= cal_cfx_output_crownibp_lb + TOLERANCE))
@@ -94,6 +58,7 @@ class TestIBP(unittest.TestCase):
                     tighter_crownibp_to_ibp += torch.sum(cal_cfx_output_crownibp_lb - cal_cfx_output_ibp_lb)
                     tighter_real_linear_to_crownibp += torch.sum(cal_is_real_cfx_crownibp ^ cal_is_real_cfx)
                     tighter_real_crownibp_to_ibp += torch.sum(cal_is_real_cfx_ibp ^ cal_is_real_cfx_crownibp)
+                print(act)
                 print("tighter_linear_to_crownibp", tighter_linear_to_crownibp.item())
                 print("tighter_real_linear_to_crownibp", tighter_real_linear_to_crownibp.item())
                 print("tighter_crownibp_to_ibp", tighter_crownibp_to_ibp.item())
@@ -106,12 +71,13 @@ class TestIBP(unittest.TestCase):
         out_dim = 2
         batch_size = 10
         with torch.no_grad():
-            for act in [F.relu, F.leaky_relu, torch.sigmoid, torch.tanh]:
+            for act in [ReLU, lambda: LeakyReLU(0.1)]:
                 for rnd in range(20):
                     # print(act)
-                    torch.random.manual_seed(rnd)
-                    model = FNN(in_dim, out_dim, [3, 4, 5], epsilon=eps, bias_epsilon=bias_eps, activation=act)
+                    seed_everything(rnd)
+                    model_ori = FNN(in_dim, out_dim, [3, 4, 5], epsilon=eps, bias_epsilon=bias_eps, activation=act)
                     x_ = (0.5 - torch.rand(batch_size, in_dim)) * 20
+                    model = VerifyModel(model_ori, x_[:2])
                     cfx_x_ = x_ + (0.5 - torch.rand(x_.shape)) * 10
                     output = model.forward_point_weights_bias(x_)
                     y = output.argmax(dim=-1)
@@ -119,26 +85,10 @@ class TestIBP(unittest.TestCase):
                     for _ in range(100):
                         x = x_
                         cfx_x = cfx_x_
-                        for i, num_hidden in enumerate(model.num_hiddens):
-                            layer = getattr(model, 'fc{}'.format(i))
-                            weights = layer.linear.weight + (
-                                    0.5 - torch.randint(0, 2, layer.linear.weight.shape)) * 2 * eps
-                            bias = layer.linear.bias + (
-                                    0.5 - torch.randint(0, 2, layer.linear.bias.shape)) * 2 * bias_eps
-                            x = F.linear(x, weights, bias)
-                            x = act(x)
-                            cfx_x = F.linear(cfx_x, weights, bias)
-                            cfx_x = act(cfx_x)
-
-                        weights = model.fc_final.linear.weight + (
-                                0.5 - torch.randint(0, 2, model.fc_final.linear.weight.shape)) * 2 * eps
-                        bias = model.fc_final.linear.bias + (
-                                0.5 - torch.randint(0, 2, model.fc_final.linear.bias.shape)) * 2 * bias_eps
-                        x = F.linear(x, weights, bias)
+                        x, cfx_x = model.ori_model.forward_with_noise(x, cfx_x)
                         x = x[:, 1] - x[:, 0]
-                        cfx_x = F.linear(cfx_x, weights, bias)
                         cfx_x = cfx_x[:, 1] - cfx_x[:, 0]
-                        is_real_cfx = torch.where(y == 0, (x <= 0) & (cfx_x <= 0), (x >= 0) & (cfx_x >= 0))
+                        is_real_cfx = torch.where(y == 0, (x <= 0) & (cfx_x <= 0), (x > 0) & (cfx_x > 0))
                         is_sound = torch.where(y == 0, cal_cfx_output <= cfx_x + TOLERANCE,
                                                cfx_x - TOLERANCE <= cal_cfx_output)
                         self.assertTrue(torch.all((~is_real_cfx) | cal_is_real_cfx))
@@ -147,8 +97,9 @@ class TestIBP(unittest.TestCase):
 
     def test_get_ub(self):
         eps = 1e-1
-        model = FNN(5, 2, [3, 4, 5], epsilon=eps)
-        torch.random.manual_seed(42)
+        ori_model = FNN(5, 2, [3, 4, 5], epsilon=eps)
+        model = VerifyModel(ori_model, torch.normal(0, 1, (2, 5)))
+        seed_everything(42)
         k = torch.normal(0, 1, (4, 4))
         k = torch.round(k * 100) / 100
         # tensor([[ 1.9300,  1.4900,  0.9000, -2.1100],

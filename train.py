@@ -8,13 +8,11 @@ import torch.nn.functional as F
 from utils import dataset
 from utils import cfx
 from models.IBPModel import FNN
-from models.standard_model import Standard_FNN
 
 import argparse
 
 
-def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, cfx_method, onehot, epsilon=None,
-              bias_epsilon=None):
+def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, cfx_method, onehot, epsilon, bias_epsilon):
     model = FNN(dim_in, 2, num_hiddens, epsilon=epsilon, bias_epsilon=bias_epsilon)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -114,6 +112,10 @@ def train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, cfx_method
     return model
 
 
+def train_IBP_counternet(train_data, test_data, batch_size, dim_in, num_hiddens, onehot, epsilon, bias_epsilon):
+    pass
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('model_name', type=str,
@@ -122,7 +124,8 @@ if __name__ == '__main__':
     parser.add_argument('--model', type=str, default='IBP', help='IBP or Standard', choices=['IBP', 'Standard'])
 
     # cfx args
-    parser.add_argument('--cfx', type=str, default="wachter", help="wachter or proto", choices=["wachter", "proto"])
+    parser.add_argument('--cfx', type=str, default="wachter", help="wachter or proto",
+                        choices=["wachter", "proto", "counternet"])
     parser.add_argument('--onehot', action='store_true', help='whether to use one-hot encoding')
     parser.add_argument('--proto_theta', type=float, default=100, help='theta for proto')
     parser.add_argument('--wachter_max_iter', type=int, default=100, help='max iter for wachter')
@@ -164,7 +167,11 @@ if __name__ == '__main__':
         args.ratio = 0
         args.cfx_generation_freq = args.epoch + 1  # never generate cfx
 
-    model = train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, args.cfx, args.onehot,
-                      epsilon=args.epsilon, bias_epsilon=args.bias_epsilon)
+    if args.cfx == "counternet":
+        model = train_IBP_counternet(train_data, test_data, batch_size, dim_in, num_hiddens, args.onehot, args.epsilon,
+                                     args.bias_epsilon)
+    else:
+        model = train_IBP(train_data, test_data, batch_size, dim_in, num_hiddens, args.cfx, args.onehot,
+                          args.epsilon, args.bias_epsilon)
 
     torch.save(model.state_dict(), os.path.join(args.save_dir, args.model_name + '.pt'))
