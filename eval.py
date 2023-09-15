@@ -41,7 +41,7 @@ def create_CFX(args, model, minmax, train_data, test_data, num_hiddens):
 
 
 def main(args):
-    torch.random.manual_seed(0)
+    torch.random.manual_seed(args.seed)
 
     if args.cfx == 'proto':
         feature_types = dataset.CREDIT_FEAT_PROTO
@@ -99,6 +99,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--epsilon', type=float, default=1e-2, help='epsilon for IBP')
     parser.add_argument('--bias_epsilon', type=float, default=1e-3, help='bias epsilon for IBP')
+    parser.add_argument('--seed', type=int, default=0, help='random seed')
     args = parser.parse_args()
 
     if not os.path.exists(args.cfx_save_dir):
