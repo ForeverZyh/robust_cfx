@@ -12,13 +12,14 @@ from utils import cfx
 from utils import dataset
 from utils.cfx_evaluator import CFXEvaluator
 from utils.utilities import seed_everything
+from train import prepare_data_and_model
 
 '''
 Evaluate the robustness of counterfactual explanations
 '''
 
 
-def create_CFX(args, model, minmax, train_data, test_data, num_hiddens):
+def create_CFX(args, model, minmax, train_data, test_data):
     @torch.no_grad()
     def predictor(X: np.ndarray) -> np.ndarray:
         X = torch.as_tensor(X, dtype=torch.float32)
@@ -28,7 +29,7 @@ def create_CFX(args, model, minmax, train_data, test_data, num_hiddens):
             ret = ret.cpu().numpy()
         return ret
 
-    cfx_generator = cfx.CFX_Generator(predictor, train_data, num_layers=len(num_hiddens))
+    cfx_generator = cfx.CFX_Generator(predictor, train_data, num_layers=None)
 
     if args.cfx == 'wachter':
         cfx_x, is_cfx = cfx_generator.run_wachter(scaler=minmax, max_iter=args.wachter_max_iter,
@@ -43,37 +44,18 @@ def create_CFX(args, model, minmax, train_data, test_data, num_hiddens):
 
 def main(args):
     seed_everything(args.seed)
-
-    if args.cfx == 'proto':
-        feature_types = dataset.CREDIT_FEAT_PROTO
-    else:
-        feature_types = dataset.CREDIT_FEAT
-
-    if args.onehot:
-        minmax = None
-        train_data, min_vals, max_vals = dataset.load_data("data/german_train.csv", "credit_risk", feature_types)
-        test_data, _, _ = dataset.load_data("data/german_test.csv", "credit_risk", feature_types, min_vals, max_vals)
-    else:
-        train_data, test_data, minmax = dataset.load_data_v1("data/german_train.csv", "data/german_test.csv",
-                                                             "credit_risk",
-                                                             feature_types)
-
+    ret = prepare_data_and_model(args)
+    train_data, test_data, model, minmax = ret["train_data"], ret["test_data"], ret["model"], ret["minmax"]
     if args.num_to_run is not None:
         test_data.X = test_data.X[:args.num_to_run]
         test_data.y = test_data.y[:args.num_to_run]
 
-    dim_in = train_data.num_features
-
-    num_hiddens = [10, 10]
-
-    model_ori = FNN(dim_in, 2, num_hiddens, epsilon=args.epsilon, bias_epsilon=args.bias_epsilon)
-    model = VerifyModel(model_ori, dummy_input=torch.tensor(train_data.X[:2]))
     model.load(os.path.join(args.save_dir, args.model))
     model.eval()
     inn = Inn.from_IBPModel(model.ori_model)
 
     if not os.path.exists(args.cfx_filename):
-        cfx_x, is_cfx = create_CFX(args, model, minmax, train_data, test_data, num_hiddens)
+        cfx_x, is_cfx = create_CFX(args, model, minmax, train_data, test_data)
         with open(args.cfx_filename, 'wb') as f:
             pickle.dump((cfx_x, is_cfx), f)
     else:
@@ -85,7 +67,9 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('model', type=str, help='path to model with .pt extension')
+    parser.add_argument('model', type=str, help="path to model (don't include .pt)")
+    parser.add_argument('--config', type=str, default="assets/german_credit.json",
+                        help='config file for the dataset and the model')
     parser.add_argument('--save_dir', type=str, default="trained_models", help="directory to save models to")
     parser.add_argument('--cfx_save_dir', type=str, default="saved_cfxs", help="directory to save cfx to")
     parser.add_argument('--log_save_dir', type=str, default="logs", help="directory to save models to")

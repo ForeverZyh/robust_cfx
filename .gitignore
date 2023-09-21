@@ -2,3 +2,8 @@
 .idea/*
 *pyc
 *pt
+wandb/
+*.log
+logs/
+saved_cfxs/
+trained_models/

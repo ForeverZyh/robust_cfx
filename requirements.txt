@@ -6,3 +6,4 @@ tensorflow==2.10.1
 alibi
 tqdm
 auto_LiRPA @ git+https://github.com/Verified-Intelligence/auto_LiRPA.git
+wandb

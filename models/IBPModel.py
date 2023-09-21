@@ -1,27 +1,27 @@
-import pickle
-
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from auto_LiRPA import BoundedModule, BoundedParameter
 from auto_LiRPA.perturbations import *
-from utils.utilities import seed_everything, FAKE_INF, EPS
+from utils.utilities import seed_everything, FAKE_INF, EPS, FNNDims, get_loss_by_type
 from models.inn import Node, Interval
 
 
 class VerifyModel(nn.Module):
-    def __init__(self, model, dummy_input):
+    def __init__(self, model, dummy_input_shape, loss_func="bce"):
         super(VerifyModel, self).__init__()
         self.ori_model = model
-        self.model = BoundedModule(model, dummy_input, bound_opts={
+        self.dummy_input_shape = dummy_input_shape
+        self.model = BoundedModule(model, torch.zeros(self.dummy_input_shape), bound_opts={
             'sparse_intermediate_bounds': False,
             'sparse_conv_intermediate_bounds': False,
             'sparse_intermediate_bounds_with_ibp': False})
         self.final_node = self.model.final_name
         self.root_nodes = set(self.model.root_names)
-        self.loss_func = nn.BCELoss()
+        self.loss_func = get_loss_by_type(loss_func)
 
     def forward_point_weights_bias(self, x):
-        return self.model.forward(x)
+        return self.ori_model.forward(x)
 
     def forward_IBP(self, x, forward_first=False):
         """
@@ -140,7 +140,6 @@ class VerifyModel(nn.Module):
         cfx_output_lb = torch.max(cfx_output_lb, clb)
         cfx_output_ub = torch.min(cfx_output_ub, cub)
         can_cfx_pred_invalid = torch.where(y == 0, (lb <= 0) & (cfx_output_lb <= 0), (ub > 0) & (cfx_output_ub > 0))
-
         return can_cfx_pred_invalid, torch.where(y == 0, cfx_output_lb, cfx_output_ub)
 
     def get_diffs_binary_crownibp(self, x, cfx_x, y, forward_first=False):
@@ -198,15 +197,21 @@ class VerifyModel(nn.Module):
         cfx_output = torch.sigmoid(cfx_output)
         cfx_loss = self.loss_func(cfx_output, 1.0 - y)
         # print(cfx_loss)
-        cfx_loss = torch.where(is_real_cfx, cfx_loss, 0)
+        cfx_loss = torch.where(is_real_cfx, cfx_loss, 0.0)
         # print(cfx_loss)
         return (ori_loss + lambda_ratio * cfx_loss).mean()
 
     def save(self, filename):
+        filename += ".pt"
         torch.save(self.ori_model.state_dict(), filename)
 
     def load(self, filename):
+        filename += ".pt"
         self.ori_model.load_state_dict(torch.load(filename))
+        self.model = BoundedModule(self.ori_model, self.dummy_input_shape, bound_opts={
+            'sparse_intermediate_bounds': False,
+            'sparse_conv_intermediate_bounds': False,
+            'sparse_intermediate_bounds_with_ibp': False})
 
 
 class BoundedLinear(nn.Module):
@@ -217,8 +222,10 @@ class BoundedLinear(nn.Module):
         self.ptb_weight = PerturbationLpNorm(norm=norm, eps=epsilon)
         self.ptb_bias = PerturbationLpNorm(norm=norm, eps=bias_epsilon)
         self.linear = nn.Linear(input_dim, out_dim)
-        self.linear.weight = BoundedParameter(self.linear.weight.data, self.ptb_weight)
-        self.linear.bias = BoundedParameter(self.linear.bias.data, self.ptb_bias)
+        if epsilon > 0:
+            self.linear.weight = BoundedParameter(self.linear.weight.data, self.ptb_weight)
+        if bias_epsilon > 0:
+            self.linear.bias = BoundedParameter(self.linear.bias.data, self.ptb_bias)
 
     def forward(self, x):
         return self.linear(x)
@@ -285,7 +292,7 @@ class FNN(nn.Module):
         self.activation = activation
         self.dropout = dropout
         dims = [num_inputs] + num_hiddens
-        self.encoder = MultilayerPerception(dims, epsilon, bias_epsilon, activation, dropout=dropout)
+        self.encoder = MultilayerPerception(dims, epsilon, bias_epsilon, activation, dropout=0)  # set dropout to 0
         self.final_fc = BoundedLinear(num_hiddens[-1], num_outputs, epsilon, bias_epsilon)
         self.epsilon = epsilon
         self.bias_epsilon = bias_epsilon
@@ -295,6 +302,13 @@ class FNN(nn.Module):
         x = self.encoder(x)
         x = self.final_fc(x)
         return x
+
+    def forward_separate(self, x):
+        # for counternet
+        x = x.float()
+        h = self.encoder(x)
+        x = self.final_fc(h)
+        return h, x
 
     def forward_with_noise(self, x, cfx_x):
         x = x.float(), cfx_x.float()
@@ -338,17 +352,142 @@ class FNN(nn.Module):
         return num_layers, nodes, weights, biases
 
 
-# class CounterNet(IBPModel):
-#     def __init__(self, num_inputs, num_outputs, num_hiddens: list, epsilon=0.0, bias_epsilon=0.0, activation=F.relu):
-#         super(CounterNet, self).__init__(num_inputs, num_outputs)
-#         self.encoder_net = FNN(num_inputs, num_outputs, num_hiddens, epsilon, bias_epsilon, activation)
-#
-#     def forward_except_last(self, x):
-#         return self.encoder_net.forward_except_last(x)
-#
-#     def forward_point_weights_bias(self, x):
-#         return self.forward_point_weights_bias(x)
-#
+class EncDec(nn.Module):
+    def __init__(self, enc_dims: FNNDims, dec_dims: FNNDims, num_outputs, epsilon=0.0, bias_epsilon=0.0,
+                 activation=nn.ReLU,
+                 dropout=0):
+        super(EncDec, self).__init__()
+        self.activation = activation
+        self.dropout = dropout
+        self.enc_dims = enc_dims
+        self.dec_dims = dec_dims
+        self.encoder = MultilayerPerception([enc_dims.in_dim] + enc_dims.hidden_dims, epsilon, bias_epsilon, activation,
+                                            dropout=dropout)
+        self.decoder = MultilayerPerception([dec_dims.in_dim] + dec_dims.hidden_dims, epsilon, bias_epsilon, activation,
+                                            dropout=dropout)
+        self.final_fc = BoundedLinear(dec_dims.hidden_dims[-1], num_outputs, epsilon, bias_epsilon)
+        self.epsilon = epsilon
+        self.bias_epsilon = bias_epsilon
+
+    def forward(self, x):
+        x = x.float()  # necessary for Counterfactual generation to work
+        x = self.encoder(x)
+        x = self.decoder(x)
+        x = self.final_fc(x)
+        return x
+
+    def forward_separate(self, x):
+        # for counternet
+        x = x.float()
+        e = self.encoder(x)
+        h = self.decoder(e)
+        pred = self.final_fc(h)
+        return e, h, pred
+
+    def to_Inn(self):
+        num_layers = 1 + len(self.enc_dims.hidden_dims) + 1 + len(
+            self.dec_dims.hidden_dims) + 1  # count input and output layers
+        nodes = {}
+        nodes[0] = [Node(0, i) for i in range(self.enc_dims.in_dim)]
+        for i in range(len(self.enc_dims.hidden_dims)):
+            nodes[i + 1] = [Node(i + 1, j) for j in range(self.enc_dims.hidden_dims[i])]
+        inter_layer_id = 1 + len(self.enc_dims.hidden_dims)
+        nodes[inter_layer_id] = [Node(inter_layer_id, i) for i in range(self.dec_dims.in_dim)]
+        for i in range(len(self.dec_dims.hidden_dims)):
+            nodes[inter_layer_id + 1] = [Node(inter_layer_id + 1, j) for j in range(self.dec_dims.hidden_dims[i])]
+        # here the paper assumes the output layer has 1 node, but we have multiple nodes
+        nodes[num_layers - 1] = [Node(num_layers - 1, 0)]
+        weights = {}
+        biases = {}
+        for i in range(len(self.encoder.blocks)):
+            layer = self.encoder.blocks[i].linear.linear
+            ws = layer.weight.data.numpy()
+            bs = layer.bias.data.numpy()
+            for node_from in nodes[i]:
+                for node_to in nodes[i + 1]:
+                    # round by 4 decimals
+                    w_val = round(ws[node_to.index][node_from.index], 8)
+                    weights[(node_from, node_to)] = Interval(w_val, w_val - self.epsilon, w_val + self.epsilon)
+                    b_val = round(bs[node_to.index], 8)
+                    biases[node_to] = Interval(b_val, b_val - self.bias_epsilon, b_val + self.bias_epsilon)
+
+        for j in range(len(self.decoder.blocks)):
+            layer = self.decoder.blocks[j].linear.linear
+            ws = layer.weight.data.numpy()
+            bs = layer.bias.data.numpy()
+            i = inter_layer_id + j
+            for node_from in nodes[i]:
+                for node_to in nodes[i + 1]:
+                    # round by 4 decimals
+                    w_val = round(ws[node_to.index][node_from.index], 8)
+                    weights[(node_from, node_to)] = Interval(w_val, w_val - self.epsilon, w_val + self.epsilon)
+                    b_val = round(bs[node_to.index], 8)
+                    biases[node_to] = Interval(b_val, b_val - self.bias_epsilon, b_val + self.bias_epsilon)
+
+        layer = self.final_fc.linear
+        ws = layer.weight.data.numpy()
+        bs = layer.bias.data.numpy()
+        for node_from in nodes[num_layers - 2]:
+            for node_to in nodes[num_layers - 1]:
+                # round by 4 decimals
+                w_val = round(ws[1][node_from.index] - ws[0][node_from.index], 8)
+                weights[(node_from, node_to)] = Interval(w_val, w_val - self.epsilon * 2, w_val + self.epsilon * 2)
+                b_val = round(bs[1] - bs[0], 8)
+                biases[node_to] = Interval(b_val, b_val - self.bias_epsilon * 2, b_val + self.bias_epsilon * 2)
+
+        return num_layers, nodes, weights, biases
+
+
+class CounterNet(nn.Module):
+    def __init__(self, enc_dims: FNNDims, pred_dims: FNNDims, exp_dims: FNNDims, num_outputs,
+                 epsilon=0.0, bias_epsilon=0.0, activation=nn.ReLU, dropout=0, preprocessor=None,
+                 config=None):
+        super(CounterNet, self).__init__()
+        assert enc_dims.is_before(pred_dims)
+        assert enc_dims.is_before(exp_dims)
+        exp_dims.in_dim += pred_dims.hidden_dims[-1]  # add the prediction outputs to the explanation
+        self.encoder_net_ori = EncDec(enc_dims, pred_dims, num_outputs, epsilon, bias_epsilon, activation, 0)
+        self.dummy_input_shape = (2, enc_dims.in_dim)
+        self.loss_1 = config["loss_1"]
+        self.encoder_verify = VerifyModel(self.encoder_net_ori, self.dummy_input_shape, loss_func=self.loss_1)
+        self.explainer = nn.Sequential(
+            MultilayerPerception([exp_dims.in_dim] + exp_dims.hidden_dims, 0, 0, activation, dropout),
+            nn.Linear(exp_dims.hidden_dims[-1], enc_dims.in_dim))
+        self.preprocessor = preprocessor  # for normalization
+        self.loss_2 = get_loss_by_type(config["loss_2"])
+        self.loss_3 = get_loss_by_type(config["loss_3"])
+        self.lambda_1 = config["lambda_1"]
+        self.lambda_2 = config["lambda_2"]
+        self.lambda_3 = config["lambda_3"]
+
+    def forward(self, x, hard=False):
+        e, h, pred = self.encoder_net_ori.forward_separate(x)
+        e = torch.cat((e, h), -1)
+        cfx = self.explainer(e)
+        cfx = self.preprocessor.normalize(cfx, hard)
+        return cfx, pred
+
+    def forward_point_weights_bias(self, x):
+        return self.encoder_net_ori(x)
+
+    def get_loss(self, x, y, cfx, is_cfx, ratio, loss_type="ours"):
+        return self.encoder_verify.get_loss(x, y, cfx, is_cfx, ratio, loss_type) * self.lambda_1
+
+    def get_explainer_loss(self, x, y):
+        cfx, _ = self.forward(x)
+        pred = self.encoder_net_ori.forward(cfx)
+        return self.loss_2(x.float(), cfx).mean() * self.lambda_2 + \
+               self.loss_3(torch.sigmoid(pred[:, 1] - pred[:, 0]), 1.0 - y).mean() * self.lambda_3
+
+    def save(self, filename):
+        torch.save(self.encoder_net_ori.state_dict(), filename + "_encoder_net_ori.pt")
+        torch.save(self.explainer.state_dict(), filename + "_explainer.pt")
+
+    def load(self, filename):
+        self.encoder_net_ori.load_state_dict(torch.load(filename + "_encoder_net_ori.pt"))
+        self.explainer.load_state_dict(torch.load(filename + "_explainer.pt"))
+        self.encoder_verify = VerifyModel(self.encoder_net_ori, self.dummy_input_shape, loss_func=self.loss_1)
+
 
 if __name__ == '__main__':
     seed_everything(0)
@@ -366,7 +505,7 @@ if __name__ == '__main__':
     print(f"CFX of the above points Centered at (1, -1) with label {(1 - y[0]).long().item()}", cfx_x[:5])
     print(f"Centered at (0, 0) with label {y[-1].long().item()}", x[-5:])
     print(f"CFX of the above points Centered at (1, 1) with label {(1 - y[-1]).long().item()}", cfx_x[-5:])
-    model = VerifyModel(model_ori, x[2:])
+    model = VerifyModel(model_ori, x[2:].shape)
     model.train()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-2)
     for epoch in range(500):

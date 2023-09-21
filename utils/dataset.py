@@ -1,9 +1,11 @@
 import copy
 import enum
+from typing import Union, Optional, Dict, Any, List, Callable
 
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import MinMaxScaler
 
@@ -15,10 +17,12 @@ class DataType(enum.Enum):
     ORDINAL = 1
     CONTINUOUS_REAL = 2
 
+
 class Immutability(enum.Enum):
     ANY = 0
     INCREASE = 1
     NONE = 2
+
 
 CREDIT_FEAT = {
     0: DataType.DISCRETE,  # checking account status
@@ -65,14 +69,13 @@ CREDIT_FEAT_PROTO = {
     17: DataType.CONTINUOUS_REAL,  # duration
     18: DataType.CONTINUOUS_REAL,  # credit amount
     19: DataType.CONTINUOUS_REAL,  # age
-
-
 }
 
 ORDINAL_FEATURES_CREDIT = {"installment_rate": 4, "present_residence": 4, "number_credits": 4}
-DISCRETE_FEATURES_CREDIT = {"status": 4, "credit_history": 5, "purpose": 10, "savings": 5, "employment_duration": 5, 
-                        "personal_status_sex": 4, "other_debtors": 3, "property": 4, "other_installment_plans": 3, "housing": 3,
-                        "job": 4,"people_liable": 2, "telephone": 2, "foreign_worker": 2}
+DISCRETE_FEATURES_CREDIT = {"status": 4, "credit_history": 5, "purpose": 10, "savings": 5, "employment_duration": 5,
+                            "personal_status_sex": 4, "other_debtors": 3, "property": 4, "other_installment_plans": 3,
+                            "housing": 3,
+                            "job": 4, "people_liable": 2, "telephone": 2, "foreign_worker": 2}
 CONTINUOUS_FEATURES_CREDIT = ["duration", "amount", "age"]
 
 # Indicate whether the CREDIT dataset features are mutable.
@@ -106,10 +109,11 @@ IMMUTABILITY_CREDIT_FEAT = {
 
 # continuous varialbes must come last
 COLUMNS_CREDIT = ['status', 'credit_history', 'purpose', 'savings', 'employment_duration',
- 'installment_rate', 'personal_status_sex', 'other_debtors', 'present_residence', 'property',
- 'other_installment_plans', 'housing', 'number_credits', 'job', 'people_liable', 'telephone',
- 'foreign_worker', 'duration', 'amount', 'age']
+                  'installment_rate', 'personal_status_sex', 'other_debtors', 'present_residence', 'property',
+                  'other_installment_plans', 'housing', 'number_credits', 'job', 'people_liable', 'telephone',
+                  'foreign_worker', 'duration', 'amount', 'age']
 VALS_PER_FEATURE_CREDIT = [4, 5, 10, 5, 5, 4, 4, 3, 4, 4, 3, 3, 4, 4, 2, 2, 2, 1, 1, 1]
+
 
 class Custom_Dataset(Dataset):
     '''
@@ -122,7 +126,7 @@ class Custom_Dataset(Dataset):
     def __init__(self, data_file, label_col, feature_types):
         data = pd.read_csv(data_file)
         X = data.drop(columns=[label_col])
-        
+
         self.X = torch.from_numpy(X.values).float()
         self.y = data[label_col].values
 
@@ -133,7 +137,7 @@ class Custom_Dataset(Dataset):
         self.ordinal_features = {}
         self.continuous_features = []
         self.feat_var_map = {}
-        
+
         # feat var map is just a dictionary mapping x --> x for x in [0, 1, num_feat-1] since we use all features
         self.feat_var_map = {i: [i] for i in range(self.num_features)}
 
@@ -147,7 +151,6 @@ class Custom_Dataset(Dataset):
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx], idx
 
-
     def build_discrete_features(self):
         '''
             self.discrete_features is the map x --> number of possible values for x for all discrete features.
@@ -156,19 +159,20 @@ class Custom_Dataset(Dataset):
             val = self.feature_types[idx]
             if val == DataType.DISCRETE:
                 self.discrete_features[self.feat_var_map[idx][0]] = max(self.X[:, idx]) + 1
-    
+
     def build_ordinal_features(self):
         for idx in self.feature_types.keys():
             val = self.feature_types[idx]
             if val == DataType.ORDINAL:
-                self.ordinal_features[self.feat_var_map[idx][0]]= self.X[:, idx].max() + 1
-    
+                self.ordinal_features[self.feat_var_map[idx][0]] = self.X[:, idx].max() + 1
+
     def build_continuous_features(self):
         ''' List of indices of continuous features'''
         for idx in self.feature_types.keys():
             val = self.feature_types[idx]
             if val == DataType.CONTINUOUS_REAL:
                 self.continuous_features.append(self.feat_var_map[idx][0])
+
 
 class Preprocessor:
     """
@@ -187,6 +191,9 @@ class Preprocessor:
         self.columns = columns
         self.enc_cols = columns
         self.feature_var_map = dict()
+        self.cont_features = []
+        self.min_vals = None
+        self.max_vals = None
 
     def _encode_one_feature(self, df, name, feat_num, type):
         '''
@@ -200,10 +207,10 @@ class Preprocessor:
         # combining the two lines below into one line doesn't work, idk why
         enccolslist = [x for x in self.enc_cols]
         i = enccolslist.index(name)
-        
+
         enc_idx = list(range(i, i + feat_num))
         df_front = df[self.enc_cols[:i]]
-        df_back = df[self.enc_cols[i+1:]]
+        df_back = df[self.enc_cols[i + 1:]]
 
         enc = df[self.enc_cols[i]]
         enc = enc[~np.isnan(enc)]  # to avoid nan bugs from pd
@@ -233,16 +240,18 @@ class Preprocessor:
 
     def encode_df(self, df):
         if type(df) != type(pd.DataFrame()):
-            df = pd.DataFrame(df, columns = self.columns)
+            df = pd.DataFrame(df, columns=self.columns)
         self.enc_cols = self.columns  # reset encoded cols
         df_copy = copy.copy(df)
         for (i, name) in enumerate(self.columns):
             if i in self.ordinal.keys():
-                df_copy, self.feature_var_map[i], column_names = self._encode_one_feature(df_copy, name, int(self.ordinal[i].item()),
-                                                                            "ordinal")
+                df_copy, self.feature_var_map[i], column_names = self._encode_one_feature(df_copy, name,
+                                                                                          int(self.ordinal[i].item()),
+                                                                                          "ordinal")
             elif i in self.discrete.keys():
-                df_copy, self.feature_var_map[i], column_names = self._encode_one_feature(df_copy, name, int(self.discrete[i].item()),
-                                                                            "discrete")
+                df_copy, self.feature_var_map[i], column_names = self._encode_one_feature(df_copy, name,
+                                                                                          int(self.discrete[i].item()),
+                                                                                          "discrete")
             else:
                 enccolslist = [x for x in self.enc_cols]
                 self.feature_var_map[i], column_names = [enccolslist.index(name)], self.enc_cols  # continuous
@@ -268,19 +277,54 @@ class Preprocessor:
         x_copy = copy.copy(x)
         return x_copy
 
+    def normalize(self, x, hard=False):
+        # normalize discrete features of cfx
+        for col in self.discrete:
+            cat_idx = self.feature_var_map[col][0]
+            cat_end_idx = self.feature_var_map[col][0] + self.discrete[col].long().item()
+            if hard:
+                x[:, cat_idx: cat_end_idx] = F.gumbel_softmax(x[:, cat_idx: cat_end_idx].clone().detach(), hard=hard)
+            else:
+                x[:, cat_idx: cat_end_idx] = F.softmax(x[:, cat_idx: cat_end_idx], dim=-1)
 
-def min_max_scale(df, continuous, min_vals=None, max_vals=None):
-    ''' 
-    Copied from https://github.com/junqi-jiang/robust-ce-inn : ~/expnns/preprocessor.py
-    '''
-    df_copy = copy.copy(df)
-    for i, name in enumerate(continuous):
-        min_val = min_vals[i]
-        max_val = max_vals[i]
-        df_copy[:, name] = (df_copy[:, name] - min_val) / (max_val - min_val)
-    return df_copy
+        # normalize ordinal features of cfx
+        for col in self.ordinal:
+            cat_idx = self.feature_var_map[col][0]
+            cat_end_idx = self.feature_var_map[col][0] + self.ordinal[col].long().item()
+            if hard:
+                tmp_x = F.gumbel_softmax(x[:, cat_idx: cat_end_idx].clone().detach(), hard=hard)
+            else:
+                tmp_x = F.softmax(x[:, cat_idx: cat_end_idx], dim=-1)
+            # reverse the tmp_x and cumsum
+            x[:, cat_idx: cat_end_idx] = torch.flip(torch.cumsum(torch.flip(tmp_x, dims=[1]), dim=1), dims=[1])
 
-def load_data(data, label, feature_types, min_vals=None, max_vals=None):
+        # normalize continuous features of cfx
+        for col in enumerate(self.cont_features):
+            x[:, col] = torch.clamp(x[:, col], 0.0, 1.0)
+        return x
+
+    def min_max_scale(self, df, min_vals=None, max_vals=None):
+        '''
+        Copied from https://github.com/junqi-jiang/robust-ce-inn : ~/expnns/preprocessor.py
+        '''
+        df_copy = copy.copy(df)
+        if min_vals is None:
+            min_vals = self.min_vals
+        if max_vals is None:
+            max_vals = self.max_vals
+        for i, name in enumerate(self.cont_features):
+            min_val = min_vals[i]
+            max_val = max_vals[i]
+            df_copy[:, name] = (df_copy[:, name] - min_val) / (max_val - min_val)
+        return df_copy
+
+    def make_cont_features(self, data, cont_features):
+        self.cont_features = [data.feat_var_map[i][0] for i in cont_features]
+        self.min_vals = np.min(data.X[:, self.cont_features], axis=0)
+        self.max_vals = np.max(data.X[:, self.cont_features], axis=0)
+
+
+def load_data(data, label, feature_types, preprocessor=None):
     '''
          Load data and preprocess it to be in the correct format for Proto CFX generation
          Adapted from Jiang et al. Uses a OHE for the data.
@@ -290,25 +334,22 @@ def load_data(data, label, feature_types, min_vals=None, max_vals=None):
             :param feature_types: list of length num_features, each element is a DataType enum
             :param minmax: minmax scaler (use same scaler for train and test data)
     '''
-    train_data = Custom_Dataset(data, label, feature_types)
+    data = Custom_Dataset(data, label, feature_types)
+    cont_features = [i for i in range(data.num_features) if feature_types[i] == DataType.CONTINUOUS_REAL]
+    if preprocessor is None:
+        preprocessor = Preprocessor(data.ordinal_features, data.discrete_features, data.columns)
+        need_make_cont_features = True
+    else:
+        need_make_cont_features = False
+    data.X, data.feat_var_map = preprocessor.encode_df(data.X)
+    data.num_features = data.X.shape[1]
+    if type(data.X) != type(torch.Tensor()):
+        data.X = np.array(data.X)
+    if need_make_cont_features:
+        preprocessor.make_cont_features(data, cont_features)
+    data.X = preprocessor.min_max_scale(data.X)
 
-    cont_features = [i for i in range(train_data.num_features) if feature_types[i] == DataType.CONTINUOUS_REAL]
-
-    preprocessor = Preprocessor(train_data.ordinal_features, train_data.discrete_features, train_data.columns)
-    train_data.X, train_data.feat_var_map = preprocessor.encode_df(train_data.X)
-    train_data.num_features = train_data.X.shape[1]
-    if type(train_data.X) != type(torch.Tensor()):
-        train_data.X = np.array(train_data.X)
-
-    cont_features = [train_data.feat_var_map[i][0] for i in cont_features]
-
-    if min_vals is None:
-        min_vals = np.min(train_data.X[:, cont_features], axis=0)
-        max_vals = np.max(train_data.X[:, cont_features], axis=0)
-
-    train_data.X = min_max_scale(train_data.X, cont_features, min_vals, max_vals)
-
-    return train_data, min_vals, max_vals 
+    return data, preprocessor
 
 
 def load_data_v1(data, data_test, label, feature_types):

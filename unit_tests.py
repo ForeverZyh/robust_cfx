@@ -24,7 +24,7 @@ class TestIBP(unittest.TestCase):
                     seed_everything(rnd)
                     model_ori = FNN(in_dim, out_dim, [10, 10], epsilon=eps, bias_epsilon=bias_eps, activation=act)
                     tmp_x = (0.5 - torch.rand(batch_size * 10, in_dim)) * 20
-                    model = VerifyModel(model_ori, tmp_x[:2])
+                    model = VerifyModel(model_ori, tmp_x[:2].shape)
                     tmp_y = model.forward_point_weights_bias(tmp_x).argmax(dim=-1)
                     x = tmp_x[:batch_size]
                     indices = torch.arange(batch_size, batch_size * 2)
@@ -77,7 +77,7 @@ class TestIBP(unittest.TestCase):
                     seed_everything(rnd)
                     model_ori = FNN(in_dim, out_dim, [3, 4, 5], epsilon=eps, bias_epsilon=bias_eps, activation=act)
                     x_ = (0.5 - torch.rand(batch_size, in_dim)) * 20
-                    model = VerifyModel(model_ori, x_[:2])
+                    model = VerifyModel(model_ori, x_[:2].shape)
                     cfx_x_ = x_ + (0.5 - torch.rand(x_.shape)) * 10
                     output = model.forward_point_weights_bias(x_)
                     y = output.argmax(dim=-1)
@@ -98,7 +98,7 @@ class TestIBP(unittest.TestCase):
     def test_get_ub(self):
         eps = 1e-1
         ori_model = FNN(5, 2, [3, 4, 5], epsilon=eps)
-        model = VerifyModel(ori_model, torch.normal(0, 1, (2, 5)))
+        model = VerifyModel(ori_model, (2, 5))
         seed_everything(42)
         k = torch.normal(0, 1, (4, 4))
         k = torch.round(k * 100) / 100
