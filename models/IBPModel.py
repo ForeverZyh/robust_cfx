@@ -385,16 +385,16 @@ class EncDec(nn.Module):
         return e, h, pred
 
     def to_Inn(self):
-        num_layers = 1 + len(self.enc_dims.hidden_dims) + 1 + len(
+        num_layers = 1 + len(self.enc_dims.hidden_dims) + len(
             self.dec_dims.hidden_dims) + 1  # count input and output layers
         nodes = {}
         nodes[0] = [Node(0, i) for i in range(self.enc_dims.in_dim)]
         for i in range(len(self.enc_dims.hidden_dims)):
             nodes[i + 1] = [Node(i + 1, j) for j in range(self.enc_dims.hidden_dims[i])]
-        inter_layer_id = 1 + len(self.enc_dims.hidden_dims)
-        nodes[inter_layer_id] = [Node(inter_layer_id, i) for i in range(self.dec_dims.in_dim)]
+        inter_layer_id = len(self.enc_dims.hidden_dims)
         for i in range(len(self.dec_dims.hidden_dims)):
-            nodes[inter_layer_id + 1] = [Node(inter_layer_id + 1, j) for j in range(self.dec_dims.hidden_dims[i])]
+            nodes[inter_layer_id + i + 1] = [Node(inter_layer_id + i + 1, j) for j in
+                                             range(self.dec_dims.hidden_dims[i])]
         # here the paper assumes the output layer has 1 node, but we have multiple nodes
         nodes[num_layers - 1] = [Node(num_layers - 1, 0)]
         weights = {}
@@ -471,10 +471,13 @@ class CounterNet(nn.Module):
         return self.encoder_net_ori(x)
 
     def get_loss(self, x, y, cfx, is_cfx, ratio, loss_type="ours"):
+        return self.get_predictor_loss(x, y, cfx, is_cfx, ratio, loss_type) + self.get_explainer_loss(x, y, True)
+
+    def get_predictor_loss(self, x, y, cfx, is_cfx, ratio, loss_type="ours"):
         return self.encoder_verify.get_loss(x, y, cfx, is_cfx, ratio, loss_type) * self.lambda_1
 
-    def get_explainer_loss(self, x, y):
-        cfx, _ = self.forward(x)
+    def get_explainer_loss(self, x, y, hard=True):
+        cfx, _ = self.forward(x, hard)
         pred = self.encoder_net_ori.forward(cfx)
         return self.loss_2(x.float(), cfx).mean() * self.lambda_2 + \
                self.loss_3(torch.sigmoid(pred[:, 1] - pred[:, 0]), 1.0 - y).mean() * self.lambda_3

@@ -30,6 +30,22 @@ def eval_chunk(model, test_dataloader, epoch, test_data):
     return {"test_acc": acc_cnt / len(test_data), "test_loss": total_loss / len(test_data)}
 
 
+def eval_chunk_counternet(model, test_dataloader, epoch, test_data):
+    model.eval()
+    acc_cnt = 0
+    total_loss = 0
+    with torch.no_grad():
+        for X, y, _ in test_dataloader:
+            cfx_new, _ = model.forward(X, hard=True)
+            is_cfx_new = model.forward_point_weights_bias(cfx_new).argmax(dim=1) == 1 - y
+            y_pred = model.forward_point_weights_bias(X.float()).argmax(dim=-1)
+            acc_cnt += torch.sum(y_pred == y).item()
+            total_loss += model.get_loss(X, y, cfx_new, is_cfx_new, args.ratio, args.tightness).item() * len(X)
+
+    print("Epoch", str(epoch), "Test accuracy:", acc_cnt / len(test_data), "Test loss:", total_loss / len(test_data))
+    return {"test_acc": acc_cnt / len(test_data), "test_loss": total_loss / len(test_data)}
+
+
 def eval_train_test_chunk(model, train_dataloader, test_dataloader):
     model.eval()
     dataloaders = [train_dataloader, test_dataloader]
@@ -85,6 +101,7 @@ def train_IBP(train_data, test_data, model: VerifyModel, cfx_method, onehot, fil
     is_cfx = None
     regenerate = np.ones(len(train_data)).astype(bool)
     best_val_loss = np.inf
+    best_epoch = -1
     for epoch in range(max_epochs):
         model.eval()
         wandb_log = {}
@@ -128,6 +145,7 @@ def train_IBP(train_data, test_data, model: VerifyModel, cfx_method, onehot, fil
         wandb_log.update(eval_chunk(model, test_dataloader, epoch, test_data))
         if best_val_loss > wandb_log["test_loss"]:
             best_val_loss = wandb_log["test_loss"]
+            best_epoch = epoch
             model.save(filename)
 
         if args.wandb is not None:
@@ -135,6 +153,9 @@ def train_IBP(train_data, test_data, model: VerifyModel, cfx_method, onehot, fil
 
     model.load(filename)
     eval_train_test_chunk(model, train_dataloader, test_dataloader)
+    if args.wandb is not None:
+        args.wandb.summary["best_epoch"] = best_epoch
+    print("best epoch: ", best_epoch)
     return model
 
 
@@ -150,6 +171,7 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
     cfx_x = None
     is_cfx = None
     best_val_loss = np.inf
+    best_epoch = -1
     for epoch in range(max_epochs):
         wandb_log = {}
         model.eval()
@@ -184,11 +206,11 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
             # predictor step
             optimizer_1.zero_grad()
             if cfx_x is None:
-                loss = model.get_loss(X, y, None, None, 0)
+                loss = model.get_predictor_loss(X, y, None, None, 0)
             else:
                 this_cfx = cfx_x[idx]
                 this_is_cfx = is_cfx[idx]
-                loss = model.get_loss(X, y, this_cfx, this_is_cfx, args.ratio, args.tightness)
+                loss = model.get_predictor_loss(X, y, this_cfx, this_is_cfx, args.ratio, args.tightness)
             predictor_loss += loss.item() * X.shape[0]
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.config["clip_grad_norm"])
@@ -209,16 +231,20 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
             print("predictor_loss: ", predictor_loss / len(train_data))
             print("explainer_loss: ", explainer_loss / len(train_data))
 
-        wandb_log.update(eval_chunk(model, test_dataloader, epoch, test_data))
+        wandb_log.update(eval_chunk_counternet(model, test_dataloader, epoch, test_data))
         if best_val_loss > wandb_log["test_loss"]:
             best_val_loss = wandb_log["test_loss"]
             model.save(filename)
+            best_epoch = epoch
 
         if args.wandb is not None:
             args.wandb.log(wandb_log, commit=True)
 
     model.load(filename)
     eval_train_test_chunk(model, train_dataloader, test_dataloader)
+    if args.wandb is not None:
+        args.wandb.summary["best_epoch"] = best_epoch
+    print("best epoch: ", best_epoch)
     return model
 
 

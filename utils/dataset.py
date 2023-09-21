@@ -283,7 +283,7 @@ class Preprocessor:
             cat_idx = self.feature_var_map[col][0]
             cat_end_idx = self.feature_var_map[col][0] + self.discrete[col].long().item()
             if hard:
-                x[:, cat_idx: cat_end_idx] = F.gumbel_softmax(x[:, cat_idx: cat_end_idx].clone().detach(), hard=hard)
+                x[:, cat_idx: cat_end_idx] = F.gumbel_softmax(x[:, cat_idx: cat_end_idx], hard=hard)
             else:
                 x[:, cat_idx: cat_end_idx] = F.softmax(x[:, cat_idx: cat_end_idx], dim=-1)
 
@@ -292,7 +292,7 @@ class Preprocessor:
             cat_idx = self.feature_var_map[col][0]
             cat_end_idx = self.feature_var_map[col][0] + self.ordinal[col].long().item()
             if hard:
-                tmp_x = F.gumbel_softmax(x[:, cat_idx: cat_end_idx].clone().detach(), hard=hard)
+                tmp_x = F.gumbel_softmax(x[:, cat_idx: cat_end_idx], hard=hard)
             else:
                 tmp_x = F.softmax(x[:, cat_idx: cat_end_idx], dim=-1)
             # reverse the tmp_x and cumsum

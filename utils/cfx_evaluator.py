@@ -72,26 +72,24 @@ class CFXEvaluator:
         ret += f"{solver_bound_better} solver bounds are better than ours.\n"
 
         # Proximity & Sparsity
-        proximity = 0
-        sparsity = 0
+        proximity = []
+        sparsity = []
         for i, (x, cfx_x_, is_cfx_) in enumerate(zip(self.test_data.X, self.cfx_x, is_cfx)):
             if is_cfx_:
-                proximity += torch.norm(torch.tensor(x) - cfx_x_, p=1).item() / len(x)
-                sparsity += torch.sum(torch.abs(torch.tensor(x) - cfx_x_) > TOLERANCE).item() / len(x)
-        proximity /= total_cor
-        sparsity /= total_cor
-        ret += f"Proximity: {round(proximity, 4)}\n"
-        ret += f"Sparsity: {round(sparsity, 4)}\n"
+                proximity.append(torch.norm(torch.tensor(x) - cfx_x_, p=1).item() / len(x))
+                sparsity.append(torch.sum(torch.abs(torch.tensor(x) - cfx_x_) > TOLERANCE).item() / len(x))
+        ret += f"Proximity mean: {round(np.mean(proximity), 4)}, std: {round(np.std(proximity), 4)}\n"
+        ret += f"Sparsity mean: {round(np.mean(sparsity), 4)}, std: {round(np.std(sparsity), 4)}\n"
 
         # Distance to data manifold
-        dist = 0
+        dist = []
         neigh = NearestNeighbors(n_neighbors=1, p=1)
         neigh.fit(self.train_data.X)
         for i, (cfx_x_, is_cfx_) in enumerate(zip(self.cfx_x, is_cfx)):
             if is_cfx_:
-                dist = neigh.kneighbors(np.array([cfx_x_.cpu().numpy()]), return_distance=True)[0][0][0]
-        dist /= total_cor
-        ret += f"Distance to data manifold: {round(dist, 4)}\n"
+                dist.append(
+                    neigh.kneighbors(np.array([cfx_x_.cpu().numpy()]), return_distance=True)[0][0][0] / len(cfx_x_))
+        ret += f"Distance to data manifold mean: {round(np.mean(dist), 4)}, std: {round(np.std(dist), 4)}\n"
 
         return ret
 
