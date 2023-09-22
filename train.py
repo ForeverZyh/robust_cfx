@@ -116,7 +116,7 @@ def train_IBP(train_data, test_data, model: VerifyModel, cfx_method, onehot, fil
     for epoch in range(max_epochs):
         model.eval()
         wandb_log = {}
-        if epoch % cfx_generation_freq == cfx_generation_freq - 1:
+        if epoch % cfx_generation_freq == 0 and epoch > 0:
             # generate CFX
             # TODO parallelize CFX generation? might not be necessary if moving to GPUs
             if not args.inc_regenerate:
@@ -189,7 +189,7 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
     for epoch in range(max_epochs):
         wandb_log = {}
         model.eval()
-        if epoch % cfx_generation_freq == cfx_generation_freq - 1:
+        if epoch % cfx_generation_freq == 0 and epoch > 0:
             if not args.inc_regenerate or is_cfx is None:
                 regenerate = torch.ones(ori_train_len).bool()
             else:

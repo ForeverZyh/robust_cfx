@@ -186,7 +186,7 @@ class VerifyModel(nn.Module):
             return ori_loss.mean()
         max_loss = get_max_loss_by_type(self.loss_func_str)
         if cfx_x is None:
-            return ori_loss.mean() + lambda_ratio * len(x) * max_loss
+            return ori_loss.mean() + lambda_ratio * max_loss
         # print(ori_loss)
 
         if loss_type == "ours":
