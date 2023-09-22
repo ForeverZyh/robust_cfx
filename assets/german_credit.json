@@ -27,5 +27,6 @@
   "lambda_3": 1.0,
   "dropout": 0.3,
   "act": 0.01,
-  "clip_grad_norm": 0.5
+  "clip_grad_norm": 0.5,
+  "weight_decay": 0.05
 }

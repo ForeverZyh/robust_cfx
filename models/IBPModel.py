@@ -3,12 +3,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from auto_LiRPA import BoundedModule, BoundedParameter
 from auto_LiRPA.perturbations import *
-from utils.utilities import seed_everything, FAKE_INF, EPS, FNNDims, get_loss_by_type
+from utils.utilities import seed_everything, FAKE_INF, EPS, FNNDims, get_loss_by_type, get_max_loss_by_type
 from models.inn import Node, Interval
 
 
 class VerifyModel(nn.Module):
-    def __init__(self, model, dummy_input_shape, loss_func="bce"):
+    def __init__(self, model, dummy_input_shape, loss_func="mse"):
         super(VerifyModel, self).__init__()
         self.ori_model = model
         self.dummy_input_shape = dummy_input_shape
@@ -19,6 +19,7 @@ class VerifyModel(nn.Module):
         self.final_node = self.model.final_name
         self.root_nodes = set(self.model.root_names)
         self.loss_func = get_loss_by_type(loss_func)
+        self.loss_func_str = loss_func
 
     def forward_point_weights_bias(self, x):
         return self.ori_model.forward(x)
@@ -175,14 +176,17 @@ class VerifyModel(nn.Module):
             y is ground-truth label
         '''
         # convert x to float32
-        assert loss_type in ["ours", "ibp", "crownibp"]
+        assert loss_type in ["ours", "ibp", "crownibp", "none"]
         x = x.float()
         ori_output = self.forward_point_weights_bias(x)
         # print(ori_output)
         ori_output = torch.sigmoid(ori_output[:, 1] - ori_output[:, 0])
         ori_loss = self.loss_func(ori_output, y.float())
-        if lambda_ratio == 0:
+        if lambda_ratio == 0 or loss_type == "none":
             return ori_loss.mean()
+        max_loss = get_max_loss_by_type(self.loss_func_str)
+        if cfx_x is None:
+            return ori_loss.mean() + lambda_ratio * len(x) * max_loss
         # print(ori_loss)
 
         if loss_type == "ours":
@@ -197,7 +201,7 @@ class VerifyModel(nn.Module):
         cfx_output = torch.sigmoid(cfx_output)
         cfx_loss = self.loss_func(cfx_output, 1.0 - y)
         # print(cfx_loss)
-        cfx_loss = torch.where(is_real_cfx, cfx_loss, 0.0)
+        cfx_loss = torch.where(is_real_cfx, cfx_loss, max_loss)
         # print(cfx_loss)
         return (ori_loss + lambda_ratio * cfx_loss).mean()
 
@@ -208,7 +212,7 @@ class VerifyModel(nn.Module):
     def load(self, filename):
         filename += ".pt"
         self.ori_model.load_state_dict(torch.load(filename))
-        self.model = BoundedModule(self.ori_model, self.dummy_input_shape, bound_opts={
+        self.model = BoundedModule(self.ori_model, torch.zeros(self.dummy_input_shape), bound_opts={
             'sparse_intermediate_bounds': False,
             'sparse_conv_intermediate_bounds': False,
             'sparse_intermediate_bounds_with_ibp': False})

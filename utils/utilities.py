@@ -41,3 +41,12 @@ def get_loss_by_type(loss_func):
         return nn.MSELoss(reduction="none")
     else:
         raise NotImplementedError
+
+
+def get_max_loss_by_type(loss_func):
+    if loss_func == "bce":
+        return 100.0
+    elif loss_func == "mse":
+        return 1.0
+    else:
+        raise NotImplementedError

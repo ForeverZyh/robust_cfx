@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 import os
 import json
 import argparse
@@ -15,13 +15,18 @@ from models.IBPModel import FNN, VerifyModel, CounterNet
 from utils.utilities import seed_everything, FNNDims
 
 
-def eval_chunk(model, test_dataloader, epoch, test_data):
+def eval_chunk(model, val_dataloader, epoch, test_data, cfx_x, is_cfx):
     model.eval()
     acc_cnt = 0
     total_loss = 0
     with torch.no_grad():
-        for X, y, _ in test_dataloader:
-            loss = model.get_loss(X, y, None, None, 0)
+        for X, y, idx in val_dataloader:
+            if cfx_x is None:
+                loss = model.get_loss(X, y, None, None, args.ratio, args.tightness)
+            else:
+                this_cfx = cfx_x[idx]
+                this_is_cfx = is_cfx[idx]
+                loss = model.get_loss(X, y, this_cfx, this_is_cfx, args.ratio, args.tightness)
             total_loss += loss.item() * len(X)
             y_pred = model.forward_point_weights_bias(X.float()).argmax(dim=-1)
             acc_cnt += torch.sum(y_pred == y).item()
@@ -30,12 +35,12 @@ def eval_chunk(model, test_dataloader, epoch, test_data):
     return {"test_acc": acc_cnt / len(test_data), "test_loss": total_loss / len(test_data)}
 
 
-def eval_chunk_counternet(model, test_dataloader, epoch, test_data):
+def eval_chunk_counternet(model, val_dataloader, epoch, test_data):
     model.eval()
     acc_cnt = 0
     total_loss = 0
     with torch.no_grad():
-        for X, y, _ in test_dataloader:
+        for X, y, _ in val_dataloader:
             cfx_new, _ = model.forward(X, hard=True)
             is_cfx_new = model.forward_point_weights_bias(cfx_new).argmax(dim=1) == 1 - y
             y_pred = model.forward_point_weights_bias(X.float()).argmax(dim=-1)
@@ -79,10 +84,8 @@ def eval_cfx_chunk(model, cfx_dataloader, cfx_x, is_cfx, epoch):
 
 
 def train_IBP(train_data, test_data, model: VerifyModel, cfx_method, onehot, filename):
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-    train_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.config["weight_decay"])
     cfx_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=False)  # for CFX test
-    test_dataloader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
 
     @torch.no_grad()
     def predictor(X: np.ndarray) -> np.ndarray:
@@ -95,22 +98,29 @@ def train_IBP(train_data, test_data, model: VerifyModel, cfx_method, onehot, fil
 
     # not sure why we need num_layers here.
     cfx_generator = cfx.CFX_Generator(predictor, train_data, num_layers=None)
+    ori_train_len = len(train_data)
+
+    val_size = int(ori_train_len // 8)  # 1/8 of the training set is used for validation
+    train_data, val_data = random_split(train_data, [ori_train_len - val_size, val_size])
+    train_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
+    test_dataloader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
+    val_dataloader = DataLoader(val_data, batch_size=args.batch_size, shuffle=False)
+
     cfx_generation_freq = args.cfx_generation_freq
     max_epochs = args.epoch
     cfx_x = None
     is_cfx = None
-    regenerate = np.ones(len(train_data)).astype(bool)
+    regenerate = np.ones(ori_train_len).astype(bool)
     best_val_loss = np.inf
     best_epoch = -1
     for epoch in range(max_epochs):
         model.eval()
         wandb_log = {}
-        if epoch % cfx_generation_freq == cfx_generation_freq - 1 and (epoch != max_epochs - 1):
-
+        if epoch % cfx_generation_freq == cfx_generation_freq - 1:
             # generate CFX
             # TODO parallelize CFX generation? might not be necessary if moving to GPUs
             if not args.inc_regenerate:
-                regenerate = np.ones(len(train_data)).astype(bool)
+                regenerate = np.ones(ori_train_len).astype(bool)
             if cfx_method == "proto":
                 cfx_x, is_cfx = cfx_generator.run_proto(scaler=None, theta=args.proto_theta, onehot=onehot,
                                                         CEs=cfx_x, is_CE=is_cfx, regenerate=regenerate)
@@ -128,7 +138,7 @@ def train_IBP(train_data, test_data, model: VerifyModel, cfx_method, onehot, fil
         for batch, (X, y, idx) in enumerate(train_dataloader):
             optimizer.zero_grad()
             if cfx_x is None:
-                loss = model.get_loss(X, y, None, None, 0)
+                loss = model.get_loss(X, y, None, None, args.ratio, args.tightness)
             else:
                 this_cfx = cfx_x[idx]
                 this_is_cfx = is_cfx[idx]
@@ -142,7 +152,7 @@ def train_IBP(train_data, test_data, model: VerifyModel, cfx_method, onehot, fil
         if args.wandb is None:
             print("Epoch", str(epoch), "train_loss:", total_loss / len(train_data))
 
-        wandb_log.update(eval_chunk(model, test_dataloader, epoch, test_data))
+        wandb_log.update(eval_chunk(model, val_dataloader, epoch, test_data, cfx_x, is_cfx))
         if best_val_loss > wandb_log["test_loss"]:
             best_val_loss = wandb_log["test_loss"]
             best_epoch = epoch
@@ -160,11 +170,15 @@ def train_IBP(train_data, test_data, model: VerifyModel, cfx_method, onehot, fil
 
 
 def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
-    optimizer_1 = torch.optim.AdamW(model.parameters(), lr=args.lr)
-    optimizer_2 = torch.optim.AdamW(model.parameters(), lr=args.lr)
+    optimizer_1 = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.config["weight_decay"])
+    optimizer_2 = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.config["weight_decay"])
+    cfx_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=False)  # for CFX test
+    ori_train_len = len(train_data)
+    val_size = int(ori_train_len // 8)  # 1/8 of the training set is used for validation
+    train_data, val_data = random_split(train_data, [ori_train_len - val_size, val_size])
     train_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
-    cfx_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=False)  # for CFX generation
     test_dataloader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
+    val_dataloader = DataLoader(val_data, batch_size=args.batch_size, shuffle=False)
 
     cfx_generation_freq = args.cfx_generation_freq
     max_epochs = args.epoch
@@ -175,9 +189,9 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
     for epoch in range(max_epochs):
         wandb_log = {}
         model.eval()
-        if epoch % cfx_generation_freq == cfx_generation_freq - 1 and (epoch != max_epochs - 1):
+        if epoch % cfx_generation_freq == cfx_generation_freq - 1:
             if not args.inc_regenerate or is_cfx is None:
-                regenerate = torch.ones(len(train_data)).bool()
+                regenerate = torch.ones(ori_train_len).bool()
             else:
                 regenerate = ~is_cfx
             with torch.no_grad():
@@ -231,7 +245,7 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
             print("predictor_loss: ", predictor_loss / len(train_data))
             print("explainer_loss: ", explainer_loss / len(train_data))
 
-        wandb_log.update(eval_chunk_counternet(model, test_dataloader, epoch, test_data))
+        wandb_log.update(eval_chunk_counternet(model, val_dataloader, epoch, test_data))
         if best_val_loss > wandb_log["test_loss"]:
             best_val_loss = wandb_log["test_loss"]
             model.save(filename)
@@ -320,8 +334,8 @@ if __name__ == '__main__':
     # IBP training args
     parser.add_argument('--cfx_generation_freq', type=int, default=20, help='frequency of CFX generation')
     parser.add_argument('--ratio', type=float, default=0.1, help='ratio of CFX loss')
-    parser.add_argument('--tightness', choices=["ours", "ibp", "crownibp"], default="ours",
-                        help='the tightness of the bound')
+    parser.add_argument('--tightness', choices=["ours", "ibp", "crownibp", "none"], default="ours",
+                        help='the tightness of the bound. None means not using the bound.')
     parser.add_argument('--inc_regenerate', action='store_true',
                         help='whether to regenerate CFXs incrementally for those that are no longer CFX each time')
     parser.add_argument('--epsilon', type=float, default=1e-2, help='epsilon for IBP')
@@ -341,6 +355,7 @@ if __name__ == '__main__':
     if args.model == "Standard":
         args.ratio = 0
         args.cfx_generation_freq = args.epoch + 1  # never generate cfx
+        args.tightness = "none"
 
     ret = prepare_data_and_model(args)
 
