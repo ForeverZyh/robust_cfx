@@ -71,6 +71,32 @@ CREDIT_FEAT_PROTO = {
     19: DataType.CONTINUOUS_REAL,  # age
 }
 
+HELOC_FEAT = {
+    0: DataType.CONTINUOUS_REAL, # ExternalRiskEstimate
+    1: DataType.CONTINUOUS_REAL, # MSinceOldestTradeOpen
+    2: DataType.CONTINUOUS_REAL, # MSinceMostRecentTradeOpen
+    3: DataType.CONTINUOUS_REAL, # AverageMInFile
+    4: DataType.CONTINUOUS_REAL, # NumSatisfactoryTrades
+    5: DataType.CONTINUOUS_REAL, # NumTrades60Ever2DerogPubRec
+    6: DataType.CONTINUOUS_REAL, # NumTrades90Ever2DerogPubRec
+    7: DataType.CONTINUOUS_REAL, # PercentTradesNeverDelq
+    8: DataType.CONTINUOUS_REAL, # MSinceMostRecentDelq
+    9: DataType.CONTINUOUS_REAL, # MaxDelq2PublicRecLast12M
+    10: DataType.CONTINUOUS_REAL, # MaxDelqEver
+    11: DataType.CONTINUOUS_REAL, # NumTotalTrades
+    12: DataType.CONTINUOUS_REAL, # NumTradesOpeninLast12M
+    13: DataType.CONTINUOUS_REAL, # PercentInstallTrades
+    14: DataType.CONTINUOUS_REAL, # MSinceMostRecentInqexcl7days
+    15: DataType.CONTINUOUS_REAL, # NumInqLast6M
+    16: DataType.CONTINUOUS_REAL, # NumInqLast6Mexcl7days
+    17: DataType.CONTINUOUS_REAL, # NetFractionRevolvingBurden
+    18: DataType.CONTINUOUS_REAL, # NetFractionInstallBurden
+    19: DataType.CONTINUOUS_REAL, # NumRevolvingTradesWBalance
+    20: DataType.CONTINUOUS_REAL, # NumInstallTradesWBalance
+    21: DataType.CONTINUOUS_REAL, # NumBank2NatlTradesWHighUtilization
+    22: DataType.CONTINUOUS_REAL, # PercentTradesWBalance
+}
+
 ORDINAL_FEATURES_CREDIT = {"installment_rate": 4, "present_residence": 4, "number_credits": 4}
 DISCRETE_FEATURES_CREDIT = {"status": 4, "credit_history": 5, "purpose": 10, "savings": 5, "employment_duration": 5,
                             "personal_status_sex": 4, "other_debtors": 3, "property": 4, "other_installment_plans": 3,

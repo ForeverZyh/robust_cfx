@@ -86,13 +86,13 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('model', type=str, help="path to model (don't include .pt)")
+    parser.add_argument('model', type=str, help="model name (don't include path or .pt)")
     parser.add_argument('--config', type=str, default="assets/german_credit.json",
                         help='config file for the dataset and the model')
-    parser.add_argument('--save_dir', type=str, default="trained_models", help="directory to save models to")
+    parser.add_argument('--save_dir', type=str, default="trained_models", help="directory where model is saved")
     parser.add_argument('--cfx_save_dir', type=str, default="saved_cfxs", help="directory to save cfx to")
-    parser.add_argument('--log_save_dir', type=str, default="logs", help="directory to save models to")
-    parser.add_argument('--log_name', type=str, default=None, help="name of log file")
+    parser.add_argument('--log_save_dir', type=str, default="logs", help="directory to save logs to")
+    parser.add_argument('--log_name', type=str, default=None, help="name of log file, end with .txt", required=True)
     parser.add_argument('--cfx', type=str, default="wachter", choices=["wachter", "proto", "counternet"])
     parser.add_argument('--num_to_run', type=int, default=None, help='number of test examples to run')
 
@@ -106,7 +106,8 @@ if __name__ == "__main__":
     parser.add_argument('--bias_epsilon', type=float, default=1e-3, help='bias epsilon for IBP')
     parser.add_argument('--seed', type=int, default=0, help='random seed')
     args = parser.parse_args()
-    args.config = json.load(open(args.config, 'r'))
+    with open(args.config, 'r') as f:
+        args.config = json.load(f)
     if not os.path.exists(args.cfx_save_dir):
         os.makedirs(args.cfx_save_dir)
     if not os.path.exists(args.log_save_dir):

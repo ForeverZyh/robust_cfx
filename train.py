@@ -15,12 +15,11 @@ from models.IBPModel import FNN, VerifyModel, CounterNet
 from utils.utilities import seed_everything, FNNDims
 
 
-def eval_chunk(model, val_dataloader, epoch, test_data, cfx_x, is_cfx):
+def eval_chunk(model, test_dataloader, epoch, cfx_x, is_cfx):
     model.eval()
-    acc_cnt = 0
-    total_loss = 0
+    total_loss, acc_cnt, total_samples = 0, 0, 0
     with torch.no_grad():
-        for X, y, idx in val_dataloader:
+        for X, y, idx in test_dataloader:
             if cfx_x is None:
                 loss = model.get_loss(X, y, None, None, args.ratio, args.tightness)
             else:
@@ -28,11 +27,13 @@ def eval_chunk(model, val_dataloader, epoch, test_data, cfx_x, is_cfx):
                 this_is_cfx = is_cfx[idx]
                 loss = model.get_loss(X, y, this_cfx, this_is_cfx, args.ratio, args.tightness)
             total_loss += loss.item() * len(X)
+            total_samples += len(X)
             y_pred = model.forward_point_weights_bias(X.float()).argmax(dim=-1)
             acc_cnt += torch.sum(y_pred == y).item()
 
-    print("Epoch", str(epoch), "Test accuracy:", acc_cnt / len(test_data), "Test loss:", total_loss / len(test_data))
-    return {"test_acc": acc_cnt / len(test_data), "test_loss": total_loss / len(test_data)}
+    print("Epoch", str(epoch), "test acc: ", acc_cnt / total_samples, "test loss: ", total_loss / total_samples)
+
+    return {"test_acc": acc_cnt / total_samples, "test_loss": total_loss / total_samples}
 
 
 def eval_chunk_counternet(model, val_dataloader, epoch, test_data):
@@ -152,7 +153,7 @@ def train_IBP(train_data, test_data, model: VerifyModel, cfx_method, onehot, fil
         if args.wandb is None:
             print("Epoch", str(epoch), "train_loss:", total_loss / len(train_data))
 
-        wandb_log.update(eval_chunk(model, val_dataloader, epoch, test_data, cfx_x, is_cfx))
+        wandb_log.update(eval_chunk(model, test_dataloader, epoch, cfx_x, is_cfx))
         if best_val_loss > wandb_log["test_loss"]:
             best_val_loss = wandb_log["test_loss"]
             best_epoch = epoch
@@ -263,12 +264,13 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
 
 
 def prepare_data_and_model(args):
-    if args.cfx == 'proto':
-        feature_types = dataset.CREDIT_FEAT_PROTO
-    else:
-        feature_types = dataset.CREDIT_FEAT
+
     ret = {"preprocessor": None, "train_data": None, "test_data": None, "model": None, "minmax": None}
     if args.config["dataset_name"] == "german_credit":
+        if args.cfx == 'proto':
+            feature_types = dataset.CREDIT_FEAT_PROTO
+        else:
+            feature_types = dataset.CREDIT_FEAT
         if args.onehot:
             train_data, preprocessor = dataset.load_data("data/german_train.csv", "credit_risk", feature_types)
             test_data, _, = dataset.load_data("data/german_test.csv", "credit_risk", feature_types, preprocessor)
@@ -277,6 +279,16 @@ def prepare_data_and_model(args):
             train_data, test_data, minmax = dataset.load_data_v1("data/german_train.csv", "data/german_test.csv",
                                                                  "credit_risk", feature_types)
             ret["minmax"] = minmax
+    elif args.config["dataset_name"] == "heloc":
+        feature_types = dataset.HELOC_FEAT
+        if args.onehot:
+            train_data, preprocessor = dataset.load_data("data/heloc_train.csv", "label", feature_types)
+            test_data, _, = dataset.load_data("data/heloc_test.csv", "label", feature_types, preprocessor)
+            ret["preprocessor"] = preprocessor
+        else:
+            train_data, test_data, minmax = dataset.load_data_v1("data/heloc_train.csv", "data/heloc_test.csv",
+                                                             "label", feature_types)
+            ret['minmax'] = minmax
     else:
         raise NotImplementedError(f"Dataset {args.config['dataset_name']} not implemented")
     ret["train_data"] = train_data
@@ -341,7 +353,8 @@ if __name__ == '__main__':
     parser.add_argument('--epsilon', type=float, default=1e-2, help='epsilon for IBP')
     parser.add_argument('--bias_epsilon', type=float, default=1e-3, help='bias epsilon for IBP')
     args = parser.parse_args()
-    args.config = json.load(open(args.config, 'r'))
+    with open(args.config, 'r') as f:
+        args.config = json.load(f)
     args.lr = args.config["lr"]
     if args.wandb:
         args.wandb = wandb.init(project="robust_cfx", name=args.model_name, config=args.__dict__)
