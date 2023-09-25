@@ -169,11 +169,11 @@ class CFX_Generator:
             with HiddenPrints():
                 explanation = cf.explain(this_point.reshape(1, -1), Y=None, target_class=None, k=20, k_type='mean',
                                          threshold=0., verbose=True, print_every=10, log_every=10)
-            if explanation is None or explanation["cf"] is None:
+            if explanation is None or explanation.cf is None:
                 CEs[i, :] = torch.tensor(this_point)
                 is_CE[i] = 0
                 continue
-            this_cf = explanation["cf"]["X"]
+            this_cf = explanation.cf["X"]
             this_cf = np.array(this_cf[0])
             CEs[i, :] = torch.tensor(this_cf)
             is_CE[i] = 1
@@ -230,11 +230,11 @@ class CFX_Generator:
             this_point = x
             with HiddenPrints():
                 explanation = cf.explain(this_point.reshape(1, -1))
-            if explanation is None or explanation['cf'] is None:
+            if explanation is None or explanation.cf is None:
                 CEs[i, :] = torch.tensor(this_point)
                 is_CE[i] = 0
                 continue
-            this_cf = explanation["cf"]["X"]
+            this_cf = explanation.cf["X"]
             CEs[i, :] = torch.tensor(np.array(this_cf[0]))
             is_CE[i] = 1
         print("total computation time in s:", time.time() - start_time)
