@@ -15,26 +15,30 @@ from models.IBPModel import FNN, VerifyModel, CounterNet
 from utils.utilities import seed_everything, FNNDims
 
 
-def eval_chunk(model, test_dataloader, epoch, cfx_x, is_cfx):
+def eval_chunk(model, test_dataloader, val_dataloader, train_dataloader, epoch, cfx_x, is_cfx):
     model.eval()
-    total_loss, acc_cnt, total_samples = 0, 0, 0
+    dataloaders = [val_dataloader, train_dataloader, test_dataloader]
+    tasks = ["validation", "train", "test"]
+    update = {}
     with torch.no_grad():
-        for X, y, idx in test_dataloader:
-            if cfx_x is None:
-                loss = model.get_loss(X, y, None, None, args.ratio, args.tightness)
-            else:
-                this_cfx = cfx_x[idx]
-                this_is_cfx = is_cfx[idx]
-                loss = model.get_loss(X, y, this_cfx, this_is_cfx, args.ratio, args.tightness)
-            total_loss += loss.item() * len(X)
-            total_samples += len(X)
-            y_pred = model.forward_point_weights_bias(X.float()).argmax(dim=-1)
-            acc_cnt += torch.sum(y_pred == y).item()
+        for dataloader, task in zip(dataloaders,tasks):
+            total_loss, acc_cnt, total_samples = 0, 0, 0
+            for X, y, idx in dataloader:
+                if cfx_x is None:
+                    loss = model.get_loss(X, y, None, None, args.ratio, args.tightness)
+                else:
+                    this_cfx = cfx_x[idx]
+                    this_is_cfx = is_cfx[idx]
+                    loss = model.get_loss(X, y, this_cfx, this_is_cfx, args.ratio, args.tightness)
+                total_loss += loss.item() * len(X)
+                total_samples += len(X)
+                y_pred = model.forward_point_weights_bias(X.float()).argmax(dim=-1)
+                acc_cnt += torch.sum(y_pred == y).item()
 
-    print("Epoch", str(epoch), "test acc: ", acc_cnt / total_samples, "test loss: ", total_loss / total_samples)
-
-    return {"test_acc": acc_cnt / total_samples, "test_loss": total_loss / total_samples}
-
+            print("Epoch", str(epoch), f"{task} acc: ", acc_cnt / total_samples, "test loss: ", total_loss / total_samples)
+            update[f"{task}_acc"] = acc_cnt / total_samples
+            update[f"{task}_loss"] = total_loss / total_samples
+    return update
 
 def eval_chunk_counternet(model, val_dataloader, epoch, test_data):
     model.eval()
@@ -149,11 +153,11 @@ def train_IBP(train_data, test_data, model: VerifyModel, cfx_method, onehot, fil
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.config["clip_grad_norm"])
             optimizer.step()
 
-        wandb_log.update({"train_loss": total_loss / len(train_data)})
+        #wandb_log.update({"train_loss": total_loss / len(train_data)})
         if args.wandb is None:
             print("Epoch", str(epoch), "train_loss:", total_loss / len(train_data))
 
-        wandb_log.update(eval_chunk(model, test_dataloader, epoch, cfx_x, is_cfx))
+        wandb_log.update(eval_chunk(model, test_dataloader, val_dataloader, train_dataloader, epoch, cfx_x, is_cfx))
         if best_val_loss > wandb_log["test_loss"]:
             best_val_loss = wandb_log["test_loss"]
             best_epoch = epoch
