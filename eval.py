@@ -92,7 +92,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_dir', type=str, default="trained_models", help="directory where model is saved")
     parser.add_argument('--cfx_save_dir', type=str, default="saved_cfxs", help="directory to save cfx to")
     parser.add_argument('--log_save_dir', type=str, default="logs", help="directory to save logs to")
-    parser.add_argument('--log_name', type=str, default=None, help="name of log file, end with .txt", required=True)
+    parser.add_argument('--log_name', type=str, default=None, help="name of log file, end with .txt")
     parser.add_argument('--cfx', type=str, default="wachter", choices=["wachter", "proto", "counternet"])
     parser.add_argument('--num_to_run', type=int, default=None, help='number of test examples to run')
 
@@ -113,6 +113,8 @@ if __name__ == "__main__":
     if not os.path.exists(args.log_save_dir):
         os.makedirs(args.log_save_dir)
 
+    if args.log_name is None:
+        args.log_name = args.model + ".txt"
     args.log_filename = os.path.join(args.log_save_dir, args.log_name)
     args.cfx_filename = os.path.join(args.cfx_save_dir, args.log_name[:-4])
 

@@ -97,6 +97,31 @@ HELOC_FEAT = {
     22: DataType.CONTINUOUS_REAL, # PercentTradesWBalance
 }
 
+
+CTG_FEAT = {
+    0: DataType.CONTINUOUS_REAL, # LB
+    1: DataType.CONTINUOUS_REAL, # AC
+    2: DataType.CONTINUOUS_REAL, # FM
+    3: DataType.CONTINUOUS_REAL, # UC
+    4: DataType.CONTINUOUS_REAL, # DL
+    5: DataType.CONTINUOUS_REAL, # DS
+    6: DataType.CONTINUOUS_REAL, # DP
+    7: DataType.CONTINUOUS_REAL, # ASTV
+    8: DataType.CONTINUOUS_REAL, # MSTV
+    9: DataType.CONTINUOUS_REAL, # ALTV
+    10: DataType.CONTINUOUS_REAL, # MLTV
+    11: DataType.CONTINUOUS_REAL, # Width
+    12: DataType.CONTINUOUS_REAL, # Min
+    13: DataType.CONTINUOUS_REAL, # Max
+    14: DataType.CONTINUOUS_REAL, # Nmax
+    15: DataType.CONTINUOUS_REAL, # Nzeros
+    16: DataType.CONTINUOUS_REAL, # Mode
+    17: DataType.CONTINUOUS_REAL, # Mean
+    18: DataType.CONTINUOUS_REAL, # Median
+    19: DataType.CONTINUOUS_REAL, # Variance
+    20: DataType.CONTINUOUS_REAL, # Tendency
+}
+
 ORDINAL_FEATURES_CREDIT = {"installment_rate": 4, "present_residence": 4, "number_credits": 4}
 DISCRETE_FEATURES_CREDIT = {"status": 4, "credit_history": 5, "purpose": 10, "savings": 5, "employment_duration": 5,
                             "personal_status_sex": 4, "other_debtors": 3, "property": 4, "other_installment_plans": 3,

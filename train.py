@@ -281,14 +281,14 @@ def prepare_data_and_model(args):
             ret["minmax"] = minmax
     elif args.config["dataset_name"] == "heloc":
         feature_types = dataset.HELOC_FEAT
-        if args.onehot:
-            train_data, preprocessor = dataset.load_data("data/heloc_train.csv", "label", feature_types)
-            test_data, _, = dataset.load_data("data/heloc_test.csv", "label", feature_types, preprocessor)
-            ret["preprocessor"] = preprocessor
-        else:
-            train_data, test_data, minmax = dataset.load_data_v1("data/heloc_train.csv", "data/heloc_test.csv",
-                                                             "label", feature_types)
-            ret['minmax'] = minmax
+        train_data, preprocessor = dataset.load_data("data/heloc_train.csv", "label", feature_types)
+        test_data, _, = dataset.load_data("data/heloc_test.csv", "label", feature_types, preprocessor)
+        ret["preprocessor"] = preprocessor
+    elif args.config["dataset_name"] == "ctg":
+        feature_types = dataset.CTG_FEAT
+        train_data, preprocessor = dataset.load_data("data/ctg_train.csv", "label", feature_types)
+        test_data, _, = dataset.load_data("data/ctg_test.csv", "label", feature_types, preprocessor)
+        ret['preprocessor'] = preprocessor
     else:
         raise NotImplementedError(f"Dataset {args.config['dataset_name']} not implemented")
     ret["train_data"] = train_data
