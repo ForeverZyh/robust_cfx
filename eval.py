@@ -48,8 +48,8 @@ def create_CFX(args, model, minmax, train_data, test_data):
             cfx_new_list = []
             is_cfx_new_list = []
             for X, y, _ in cfx_dataloader:
-                cfx_new, _ = model.forward(X, hard=True)
-                is_cfx_new = model.forward_point_weights_bias(cfx_new).argmax(dim=1) == 1 - y
+                cfx_new, pred = model.forward(X, hard=True)
+                is_cfx_new = model.forward_point_weights_bias(cfx_new).argmax(dim=1) == 1 - pred.argmax(dim=1)
                 cfx_new_list.append(cfx_new)
                 is_cfx_new_list.append(is_cfx_new)
 
@@ -88,13 +88,15 @@ def main(args):
     if not args.generate_only:
         orig_output = model.forward_point_weights_bias(torch.tensor(test_data.X).float()).softmax(dim=1).argmax(dim=1)
         cfx_output = model.forward_point_weights_bias(cfx_x).softmax(dim=1).argmax(dim=1)
-        
+
         is_real_cfx = torch.where(torch.tensor(is_cfx)) # ignore indices that failed
         # and filter out indices that don't satisfy f(x) != f(cfx)
-        is_real_cfx = torch.where(orig_output[is_real_cfx] != cfx_output[is_real_cfx])
+        # is_real_cfx = torch.where(orig_output[is_real_cfx] != cfx_output[is_real_cfx])
 
         if not torch.all(orig_output[is_real_cfx] != cfx_output[is_real_cfx]):
-            print("\n\n\n\n\n\nproblem, some fake CFX included\n\n\n\n\n")
+            print("\n\n\n\n\n\nproblem, some fake CFX included")
+            print(torch.where(orig_output[is_real_cfx] == cfx_output[is_real_cfx]))
+            print("\n\n\n\n\n\n")
 
         cfx_eval = CFXEvaluator(cfx_x, is_cfx, model.encoder_verify if args.cfx == "counternet" else model, None,
                                 train_data, test_data, inn, args.log_filename)
