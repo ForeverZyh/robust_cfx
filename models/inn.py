@@ -35,7 +35,7 @@ class Inn:
     def __init__(self, num_layers, delta, bias_delta, nodes, weights, biases):
         self.num_layers = num_layers
         self.delta = delta
-        self.delta = bias_delta
+        self.bias_delta = bias_delta
         self.nodes = nodes
         self.weights = weights
         self.biases = biases

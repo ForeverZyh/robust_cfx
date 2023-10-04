@@ -7,3 +7,6 @@ wandb/
 logs/
 saved_cfxs/
 trained_models/
+chtc/
+data.tar.gz
+*.DS_STORE

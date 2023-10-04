@@ -25,8 +25,12 @@ class CFXEvaluator:
         pred_y_cor = self.model_ori.forward_point_weights_bias(torch.tensor(self.test_data.X).float()).argmax(
             dim=-1) == torch.tensor(self.test_data.y)
         total_cor = torch.sum(pred_y_cor).item()
+        total_samples = len(pred_y_cor)
         pred_y_cor_train = self.model_ori.forward_point_weights_bias(torch.tensor(self.train_data.X).float()).argmax(
             dim=-1) == torch.tensor(self.train_data.y)
+        
+        ret += "Epsilon: " + str(self.inn.delta) + "\n"
+        ret += "Bias Epsilon: " + str(self.inn.bias_delta) + "\n"
 
         # Accuracy
         ret += f"Model test accuracy: {round(total_cor / len(pred_y_cor) * 100, 2)}%" \
@@ -41,18 +45,18 @@ class CFXEvaluator:
         # also problematic for training data
         # if args.cfx == 'proto':
         #     test_data.feature_types = dataset.CREDIT_FEAT
-        is_cfx = self.is_cfx & pred_y_cor
+        is_cfx = self.is_cfx # & pred_y_cor # 10.2.23 update removing pred_y_cor - should consider all CFX even if pred is wrong
         total_valid = torch.sum(is_cfx).item()
-        ret += f"Validity: {round(total_valid / total_cor * 100, 2)}%" \
-               f" ({total_valid}/{total_cor})\n"
+        ret += f"Validity: {round(total_valid / total_samples * 100, 2)}%" \
+               f" ({total_valid}/{total_samples})\n"
 
         # Robustness
         _, cfx_output = self.model_ori.get_diffs_binary(torch.tensor(self.test_data.X).float(), self.cfx_x,
                                                         torch.tensor(self.test_data.y).bool())
         is_real_cfx = torch.where(torch.tensor(self.test_data.y) == 0, cfx_output > 0, cfx_output < 0) & is_cfx
         ret += f"Robustness (by our over-approximation): " \
-               f"{round(torch.sum(is_real_cfx).item() / total_cor * 100, 2)}%" \
-               f" ({torch.sum(is_real_cfx).item()}/{total_cor})\n"
+               f"{round(torch.sum(is_real_cfx).item() / total_samples * 100, 2)}%" \
+               f" ({torch.sum(is_real_cfx).item()}/{total_samples})\n"
 
         # TODO check what the activation functions of the model is using. If not ReLU, then we skip the following
         solver_robust_cnt = 0
@@ -67,8 +71,8 @@ class CFXEvaluator:
                 if res == 1:
                     solver_robust_cnt += 1
         ret += f"Robustness (by the MILP solver): " \
-               f"{round(solver_robust_cnt / total_cor * 100, 2)}%" \
-               f" ({solver_robust_cnt}/{total_cor})\n"
+               f"{round(solver_robust_cnt / total_samples * 100, 2)}%" \
+               f" ({solver_robust_cnt}/{total_samples})\n"
         ret += f"{solver_bound_better} solver bounds are better than ours.\n"
 
         # Proximity & Sparsity
