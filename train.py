@@ -225,7 +225,7 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
             # predictor step
             optimizer_1.zero_grad()
             if cfx_x is None:
-                loss = model.get_predictor_loss(X, y, None, None, 0)
+                loss = model.get_predictor_loss(X, y, None, None, args.ratio, args.tightness)
             else:
                 this_cfx = cfx_x[idx]
                 this_is_cfx = is_cfx[idx]

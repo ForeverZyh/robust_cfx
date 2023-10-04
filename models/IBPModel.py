@@ -22,7 +22,7 @@ class VerifyModel(nn.Module):
         self.loss_func_str = loss_func
 
     def forward_point_weights_bias(self, x):
-        return self.ori_model.forward(x)
+        return self.model.forward(x)
 
     def forward_IBP(self, x, forward_first=False):
         """
