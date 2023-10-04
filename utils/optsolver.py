@@ -21,13 +21,14 @@ class OptSolver:
         self.x_prime = None  # counterfactual instance
         self.eps = eps
         self.M = M
+        self.act = inn.act
         if x_prime is not None:
             self.x_prime = np.round(x_prime, 6)
         self.output_node_name = None
 
     def add_input_variable_constraints(self):
         node_var = dict()
-        for feat_idx, feat_mapping in self.dataset.feat_var_map.items(): 
+        for feat_idx, feat_mapping in self.dataset.feat_var_map.items():
             # cases by feature type, add different types of variables and constraints
             if self.dataset.feature_types[feat_idx] == DataType.DISCRETE:
                 disc_var_list = []
@@ -106,11 +107,25 @@ class OptSolver:
                                                              name='n_' + str(node))
                     aux_var[node.index] = self.model.addVar(vtype=GRB.BINARY, name='a_' + str(node))
                     self.model.update()
+                    lb = quicksum(
+                        (self.inn.weights[(node1, node)].lb * node_vars[i - 1][node1.index]) for
+                        node1 in self.inn.nodes[i - 1]) + self.inn.biases[node].lb
+                    ub = quicksum(
+                        (self.inn.weights[(node1, node)].ub * node_vars[i - 1][node1.index]) for
+                        node1 in self.inn.nodes[i - 1]) + self.inn.biases[node].ub
                     # constraint 1: node >= 0
-                    self.model.addConstr(node_var[node.index] >= 0, name="forward_pass_node_" + str(node) + "C1")
+                    if self.act == 0:
+                        self.model.addConstr(node_var[node.index] >= 0, name="forward_pass_node_" + str(node) + "C1")
+                    else:
+                        self.model.addConstr(node_var[node.index] >= self.act * lb,
+                                             name="forward_pass_node_" + str(node) + "C1")
                     # constraint 2: node <= M(1-a)
-                    self.model.addConstr(self.M * (1 - aux_var[node.index]) >= node_var[node.index],
-                                         name="forward_pass_node_" + str(node) + "C2")
+                    if self.act == 0:
+                        self.model.addConstr(self.M * (1 - aux_var[node.index]) >= node_var[node.index],
+                                            name="forward_pass_node_" + str(node) + "C2")
+                    else:
+                        self.model.addConstr(self.M * (1 - aux_var[node.index]) + self.act * ub >= node_var[node.index],
+                                            name="forward_pass_node_" + str(node) + "C2")
                     # constraint 3: node <= ub(W)x + ub(B) + Ma
                     self.model.addConstr(quicksum(
                         (self.inn.weights[(node1, node)].ub * node_vars[i - 1][node1.index]) for
@@ -118,9 +133,7 @@ class OptSolver:
                                          node_var[node.index],
                                          name="forward_pass_node_" + str(node) + "C3")
                     # constraint 4: node >= lb(W)x + lb(B)
-                    self.model.addConstr(quicksum(
-                        (self.inn.weights[(node1, node)].lb * node_vars[i - 1][node1.index]) for
-                        node1 in self.inn.nodes[i - 1]) + self.inn.biases[node].lb <= node_var[node.index],
+                    self.model.addConstr(lb <= node_var[node.index],
                                          name="forward_pass_node_" + str(node) + "C4")
                 else:
                     node_var[node.index] = self.model.addVar(lb=-float('inf'), vtype=GRB.CONTINUOUS,

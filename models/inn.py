@@ -39,6 +39,7 @@ class Inn:
         self.nodes = nodes
         self.weights = weights
         self.biases = biases
+        self.act = None
 
     @classmethod
     def from_IBPModel(cls, model):
