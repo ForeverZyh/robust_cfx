@@ -1,7 +1,7 @@
 {
     "dataset_name": "heloc",
     "encoder_dims": [
-      50,
+      100,
       10
     ],
     "decoder_dims": [
@@ -10,21 +10,21 @@
     ],
     "explainer_dims": [
       10,
-      50
+      100
     ],
     "FNN_dims": [
-      50,
+      100,
       10,
       10
     ],
-    "lr": 0.001,
+    "lr": 0.005,
     "batch_size": 128,
     "loss_1": "mse",
     "loss_2": "mse",
     "loss_3": "mse",
     "lambda_1": 1.0,
-    "lambda_2": 0.01,
-    "lambda_3": 1.0,
+    "lambda_2": 0.1,
+    "lambda_3": 0.5,
     "dropout": 0.3,
     "act": 0.01,
     "clip_grad_norm": 0.5,
