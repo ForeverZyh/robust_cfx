@@ -21,7 +21,7 @@ def eval_chunk(model, test_dataloader, val_dataloader, train_dataloader, epoch, 
     tasks = ["validation", "train", "test"]
     update = {}
     with torch.no_grad():
-        for dataloader, task in zip(dataloaders,tasks):
+        for dataloader, task in zip(dataloaders, tasks):
             total_loss, acc_cnt, total_samples = 0, 0, 0
             for X, y, idx in dataloader:
                 if cfx_x is None:
@@ -35,15 +35,18 @@ def eval_chunk(model, test_dataloader, val_dataloader, train_dataloader, epoch, 
                 y_pred = model.forward_point_weights_bias(X.float()).argmax(dim=-1)
                 acc_cnt += torch.sum(y_pred == y).item()
 
-            print("Epoch", str(epoch), f"{task} acc: ", acc_cnt / total_samples, "test loss: ", total_loss / total_samples)
+            print("Epoch", str(epoch), f"{task} acc: ", acc_cnt / total_samples, "test loss: ",
+                  total_loss / total_samples)
             update[f"{task}_acc"] = acc_cnt / total_samples
             update[f"{task}_loss"] = total_loss / total_samples
     return update
 
-def eval_chunk_counternet(model, val_dataloader, epoch, test_data):
+
+def eval_chunk_counternet(model, val_dataloader, epoch):
     model.eval()
     acc_cnt = 0
     total_loss = 0
+    total_samples = 0
     with torch.no_grad():
         for X, y, _ in val_dataloader:
             cfx_new, _ = model.forward(X, hard=True)
@@ -51,9 +54,10 @@ def eval_chunk_counternet(model, val_dataloader, epoch, test_data):
             y_pred = model.forward_point_weights_bias(X.float()).argmax(dim=-1)
             acc_cnt += torch.sum(y_pred == y).item()
             total_loss += model.get_loss(X, y, cfx_new, is_cfx_new, args.ratio, args.tightness).item() * len(X)
+            total_samples += len(X)
 
-    print("Epoch", str(epoch), "Test accuracy:", acc_cnt / len(test_data), "Test loss:", total_loss / len(test_data))
-    return {"test_acc": acc_cnt / len(test_data), "test_loss": total_loss / len(test_data)}
+    print("Epoch", str(epoch), "Test accuracy:", acc_cnt / total_samples, "Test loss:", total_loss / total_samples)
+    return {"test_acc": acc_cnt / total_samples, "test_loss": total_loss / total_samples}
 
 
 def eval_train_test_chunk(model, train_dataloader, test_dataloader):
@@ -153,7 +157,7 @@ def train_IBP(train_data, test_data, model: VerifyModel, cfx_method, onehot, fil
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.config["clip_grad_norm"])
             optimizer.step()
 
-        #wandb_log.update({"train_loss": total_loss / len(train_data)})
+        # wandb_log.update({"train_loss": total_loss / len(train_data)})
         if args.wandb is None:
             print("Epoch", str(epoch), "train_loss:", total_loss / len(train_data))
 
@@ -250,7 +254,7 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
             print("predictor_loss: ", predictor_loss / len(train_data))
             print("explainer_loss: ", explainer_loss / len(train_data))
 
-        wandb_log.update(eval_chunk_counternet(model, val_dataloader, epoch, test_data))
+        wandb_log.update(eval_chunk_counternet(model, val_dataloader, epoch))
         if best_val_loss > wandb_log["test_loss"]:
             best_val_loss = wandb_log["test_loss"]
             model.save(filename)
@@ -268,7 +272,6 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
 
 
 def prepare_data_and_model(args):
-
     ret = {"preprocessor": None, "train_data": None, "test_data": None, "model": None, "minmax": None}
     if args.config["dataset_name"] == "german_credit":
         if args.cfx == 'proto':
@@ -307,7 +310,8 @@ def prepare_data_and_model(args):
         raise NotImplementedError("Activation function not implemented")
 
     if args.cfx == "counternet":
-        assert args.onehot, "Counternet should work with onehot"
+        if args.config["dataset_name"] == "german_credit":
+            assert args.onehot, "Counternet should work with onehot"
         enc_dims = FNNDims(dim_in, args.config["encoder_dims"])
         pred_dims = FNNDims(None, args.config["decoder_dims"])
         exp_dims = FNNDims(None, args.config["explainer_dims"])
