@@ -1,6 +1,8 @@
 import torch
 from sklearn.neighbors import NearestNeighbors
 import numpy as np
+import concurrent.futures
+import tqdm
 
 from models.inn import Inn
 from utils.dataset import Custom_Dataset
@@ -57,18 +59,31 @@ class CFXEvaluator:
                f"{round(torch.sum(is_real_cfx).item() / total_valid * 100, 2)}%" \
                f" ({torch.sum(is_real_cfx).item()}/{total_valid})\n"
 
-        # TODO check what the activation functions of the model is using. If not ReLU, then we skip the following
         solver_robust_cnt = 0
         solver_bound_better = 0
-        for i, (x, y, cfx_x_, is_cfx_, loose_bound) in enumerate(
-                zip(self.test_data.X, pred_y, self.cfx_x, is_cfx, cfx_output)):
-            if is_cfx_:
-                solver = optsolver.OptSolver(self.test_data, self.inn, 1 - y, x, mode=1, x_prime=cfx_x_)
-                res, bound = solver.compute_inn_bounds()
-                if bound is not None and abs(bound - loose_bound.item()) > TOLERANCE:
-                    solver_bound_better += 1
-                if res == 1:
-                    solver_robust_cnt += 1
+        solver_cnt = 0
+        with tqdm.tqdm(total=len(pred_y)) as pbar:
+            for i, (x, y, cfx_x_, is_cfx_, loose_bound, our_robust) in enumerate(
+                    zip(self.test_data.X, pred_y, self.cfx_x, is_cfx, cfx_output, is_real_cfx)):
+                if is_cfx_:
+                    solver = optsolver.OptSolver(self.test_data, self.inn, 1 - y, x, mode=1, x_prime=cfx_x_)
+                    res, bound = None, None
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(solver.compute_inn_bounds)
+
+                        try:
+                            res, bound = future.result(timeout=15)
+                        except concurrent.futures.TimeoutError:
+                            print("Operation timed out")
+                    if bound is not None and abs(bound - loose_bound.item()) > TOLERANCE:
+                        solver_bound_better += 1
+                    if res is None:
+                        solver_robust_cnt += our_robust.item()
+                    elif res == 1:
+                        solver_robust_cnt += 1
+                    solver_cnt += 1
+                    pbar.set_postfix({'robust_pct': round(solver_robust_cnt / solver_cnt * 100, 2)})
+                pbar.update(1)
         ret += f"Robustness (by the MILP solver): " \
                f"{round(solver_robust_cnt / total_valid * 100, 2)}%" \
                f" ({solver_robust_cnt}/{total_valid})\n"

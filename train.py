@@ -11,7 +11,7 @@ import wandb
 
 from utils import dataset
 from utils import cfx
-from models.IBPModel import FNN, VerifyModel, CounterNet
+from models.IBPModel import FNN, VerifyModel, CounterNet, BoundedLinear
 from utils.utilities import seed_everything, FNNDims
 
 
@@ -47,17 +47,29 @@ def eval_chunk_counternet(model, val_dataloader, epoch):
     acc_cnt = 0
     total_loss = 0
     total_samples = 0
+    total_robust = 0
     with torch.no_grad():
         for X, y, _ in val_dataloader:
-            cfx_new, _ = model.forward(X, hard=True)
-            is_cfx_new = model.forward_point_weights_bias(cfx_new).argmax(dim=1) == 1 - y
-            y_pred = model.forward_point_weights_bias(X.float()).argmax(dim=-1)
-            acc_cnt += torch.sum(y_pred == y).item()
-            total_loss += model.get_loss(X, y, cfx_new, is_cfx_new, args.ratio, args.tightness).item() * len(X)
+            cfx_new, y_hat_pred = model.forward(X, hard=True)
+            y_hat = torch.sigmoid(y_hat_pred[:, 1] - y_hat_pred[:, 0])
+            y_hat_hard = y_hat_pred.argmax(dim=-1)
+            y_prime_hat_pred = model.forward_point_weights_bias(cfx_new)
+            y_prime_hat = torch.sigmoid(y_prime_hat_pred[:, 1] - y_prime_hat_pred[:, 0])
+            y_prime_hat_hard = y_prime_hat_pred.argmax(dim=-1)
+            is_cfx_new = y_hat_hard != y_prime_hat_hard
+            acc_cnt += torch.sum(y_hat_hard == y).item()
+            total_loss += model.get_loss(X, y, cfx_new, y_hat, y_prime_hat, is_cfx_new, args.ratio,
+                                         args.tightness).item() * len(X)
             total_samples += len(X)
+            _, cfx_output = model.encoder_verify.get_diffs_binary(X, cfx_new, y_hat_hard)
+            is_real_cfx = torch.where(y_hat_hard == 0, cfx_output > 0, cfx_output < 0)
+            assert torch.all((~is_real_cfx) | is_cfx_new).item()
+            total_robust += torch.sum(is_real_cfx).item()
 
-    print("Epoch", str(epoch), "Test accuracy:", acc_cnt / total_samples, "Test loss:", total_loss / total_samples)
-    return {"test_acc": acc_cnt / total_samples, "test_loss": total_loss / total_samples}
+    print("Epoch", str(epoch), "Test accuracy:", round(acc_cnt / total_samples * 100, 2),
+          "Test loss:", round(total_loss / total_samples, 4),
+          "Total robust:", round(total_robust / total_samples * 100, 2))
+    return {"test_acc": acc_cnt / total_samples, "test_loss": total_loss / total_samples, "total_robust": total_robust}
 
 
 def eval_train_test_chunk(model, train_dataloader, test_dataloader):
@@ -84,7 +96,8 @@ def eval_cfx_chunk(model, cfx_dataloader, cfx_x, is_cfx, epoch):
         post_valid = 0
         for (X, y, idx) in cfx_dataloader:
             cfx_y = model.forward_point_weights_bias(cfx_x[idx]).argmax(dim=-1)
-            is_cfx[idx] = is_cfx[idx] & (cfx_y == (1 - y)).bool()
+            pred_y = model.forward_point_weights_bias(X.float()).argmax(dim=-1)
+            is_cfx[idx] = is_cfx[idx] & (cfx_y == (1 - pred_y)).bool()
             post_valid += torch.sum(is_cfx[idx]).item()
 
         if args.wandb is None:
@@ -92,6 +105,7 @@ def eval_cfx_chunk(model, cfx_dataloader, cfx_x, is_cfx, epoch):
         return {"valid_cfx": post_valid}
 
 
+# TODO add changes to train_IBP to make it consistent with train_IBP_counternet
 def train_IBP(train_data, test_data, model: VerifyModel, cfx_method, onehot, filename):
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.config["weight_decay"])
     cfx_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=False)  # for CFX test
@@ -179,8 +193,10 @@ def train_IBP(train_data, test_data, model: VerifyModel, cfx_method, onehot, fil
 
 
 def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
-    optimizer_1 = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.config["weight_decay"])
-    optimizer_2 = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.config["weight_decay"])
+    # optimizer_1 = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.config["weight_decay"])
+    # optimizer_2 = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.config["weight_decay"])
+    optimizer_1 = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer_2 = torch.optim.Adam(model.parameters(), lr=args.lr)
     cfx_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=False)  # for CFX test
     ori_train_len = len(train_data)
     val_size = int(ori_train_len // 8)  # 1/8 of the training set is used for validation
@@ -196,8 +212,20 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
     best_val_loss = np.inf
     best_epoch = -1
     for epoch in range(max_epochs):
-        wandb_log = {}
+        if epoch < max_epochs * args.warm_up_epoch_pct:
+            ratio = 0
+            eps_ratio = 0
+        elif epoch < max_epochs * (args.warm_up_epoch_pct + args.linear_scaling_epoch_pct):
+            ratio = (epoch - max_epochs * args.warm_up_epoch_pct) / (
+                    max_epochs * args.linear_scaling_epoch_pct) * args.ratio
+            eps_ratio = (epoch - max_epochs * args.warm_up_epoch_pct) / (
+                    max_epochs * args.linear_scaling_epoch_pct)
+        else:
+            ratio = args.ratio
+            eps_ratio = 1
+        wandb_log = {"ratio": ratio}
         model.eval()
+        # model.encoder_net_ori.set_eps_ratio(eps_ratio)
         if epoch % cfx_generation_freq == 0 and epoch > 0:
             if not args.inc_regenerate or is_cfx is None:
                 regenerate = torch.ones(ori_train_len).bool()
@@ -207,8 +235,8 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
                 cfx_new_list = []
                 is_cfx_new_list = []
                 for X, y, _ in cfx_dataloader:
-                    cfx_new, _ = model.forward(X, hard=True)
-                    is_cfx_new = model.forward_point_weights_bias(cfx_new).argmax(dim=1) == 1 - y
+                    cfx_new, pred = model.forward(X, hard=True)
+                    is_cfx_new = model.forward_point_weights_bias(cfx_new).argmax(dim=1) == 1 - pred.argmax(dim=1)
                     cfx_new_list.append(cfx_new)
                     is_cfx_new_list.append(is_cfx_new)
 
@@ -225,35 +253,80 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
         model.train()
         predictor_loss = 0
         explainer_loss = 0
+        cfx_loss_pred = 0
+        cfx_loss_exp = 0
+        scales = []
+
+        def scale_params():
+            if args.ratio > 0:
+                # bound l2 norm
+                for i, param in enumerate(model.parameters()):
+                    if param.data.norm(2).item() > args.config["l2_norm_bound"][i]:
+                        scales.append(args.config['l2_norm_bound'][i] / param.data.norm(2).item())
+                        param.data = param.data * (args.config["l2_norm_bound"][i] / param.data.norm(2))
+                    else:
+                        scales.append(1)
+
         for batch, (X, y, idx) in enumerate(train_dataloader):
             # predictor step
             optimizer_1.zero_grad()
-            if cfx_x is None:
-                loss = model.get_predictor_loss(X, y, None, None, args.ratio, args.tightness)
-            else:
+            loss = model.get_predictor_loss(X, y)
+            predictor_loss += loss.item() * X.shape[0]
+            if cfx_x is not None and ratio > 0:
                 this_cfx = cfx_x[idx]
                 this_is_cfx = is_cfx[idx]
-                loss = model.get_predictor_loss(X, y, this_cfx, this_is_cfx, args.ratio, args.tightness)
-            predictor_loss += loss.item() * X.shape[0]
+                loss1 = model.get_cfx_loss_pred(X, y, this_cfx, this_is_cfx, ratio, args.tightness)
+                cfx_loss_pred += loss1.item() * X.shape[0]
+                loss += loss1
+
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.config["clip_grad_norm"])
             optimizer_1.step()
+            scale_params()
+
+        # if ratio > 0 and args.tightness != "none":
+        #     for batch, (X, y, idx) in enumerate(train_dataloader):
+        #         # cfx step
+        #         optimizer_3.zero_grad()
+        #         loss = model.get_cfx_loss(X, y, cfx_x[idx], is_cfx[idx], ratio, args.tightness)
+        #         cfx_loss += loss.item() * X.shape[0]
+        #         loss.backward()
+        #         torch.nn.utils.clip_grad_norm_(model.parameters(), args.config["clip_grad_norm"])
+        #         optimizer_3.step()
+        #         scale_params()
 
         for batch, (X, y, idx) in enumerate(train_dataloader):
             # explainer step
             optimizer_2.zero_grad()
-            loss = model.get_explainer_loss(X, y)
+            cfx, y_hat = model.forward(X, True)
+            y_hat = torch.sigmoid(y_hat[:, 1] - y_hat[:, 0]).detach()
+            y_hat_hard = y_hat > 0.5
+            y_prime_hat = model.encoder_net_ori.forward(cfx)
+            y_prime_hat = torch.sigmoid(y_prime_hat[:, 1] - y_prime_hat[:, 0])
+            y_prime_hat_hard = y_prime_hat > 0.5
+            loss = model.get_explainer_loss(X, cfx, y_hat, y_prime_hat)
             explainer_loss += loss.item() * X.shape[0]
+            if ratio > 0:
+                loss1 = model.get_cfx_loss_exp(X, y, cfx, y_hat_hard != y_prime_hat_hard, ratio, args.tightness)
+                cfx_loss_exp += loss1.item() * X.shape[0]
+                loss += loss1
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.config["clip_grad_norm"])
             optimizer_2.step()
+            scale_params()
 
         wandb_log.update({"predictor_loss": predictor_loss / len(train_data),
-                          "explainer_loss": explainer_loss / len(train_data)})
+                          "explainer_loss": explainer_loss / len(train_data),
+                          "cfx_loss_pred": cfx_loss_pred / len(train_data),
+                          "cfx_loss_exp": cfx_loss_exp / len(train_data),
+                          "scales": np.mean(scales)})
         if args.wandb is None:
             print("predictor_loss: ", predictor_loss / len(train_data))
             print("explainer_loss: ", explainer_loss / len(train_data))
+            print("cfx_loss_pred: ", cfx_loss_pred / len(train_data))
+            print("cfx_loss_exp: ", cfx_loss_exp / len(train_data))
 
+        # model.encoder_net_ori.set_eps_ratio(1)
         wandb_log.update(eval_chunk_counternet(model, val_dataloader, epoch))
         if best_val_loss > wandb_log["test_loss"]:
             best_val_loss = wandb_log["test_loss"]
@@ -272,6 +345,7 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
 
 
 def prepare_data_and_model(args):
+    BoundedLinear.cnt = 0
     ret = {"preprocessor": None, "train_data": None, "test_data": None, "model": None, "minmax": None}
     if args.config["dataset_name"] == "german_credit":
         if args.cfx == 'proto':
@@ -309,13 +383,15 @@ def prepare_data_and_model(args):
     else:
         raise NotImplementedError("Activation function not implemented")
 
-    if args.cfx == "counternet":
+    if args.cfx.startswith("counternet"):
         if args.config["dataset_name"] == "german_credit":
             assert args.onehot, "Counternet should work with onehot"
         enc_dims = FNNDims(dim_in, args.config["encoder_dims"])
         pred_dims = FNNDims(None, args.config["decoder_dims"])
         exp_dims = FNNDims(None, args.config["explainer_dims"])
-        model = CounterNet(enc_dims, pred_dims, exp_dims, 2, epsilon=args.epsilon, bias_epsilon=args.bias_epsilon,
+        model = CounterNet(enc_dims, pred_dims, exp_dims, 2,
+                           epsilon=args.config["eps_per_layer"],
+                           bias_epsilon=args.config["eps_per_layer"],
                            activation=act, dropout=args.config["dropout"], preprocessor=preprocessor,
                            config=args.config)
     else:
@@ -353,7 +429,10 @@ if __name__ == '__main__':
 
     # IBP training args
     parser.add_argument('--cfx_generation_freq', type=int, default=20, help='frequency of CFX generation')
-    parser.add_argument('--ratio', type=float, default=0.1, help='ratio of CFX loss')
+    parser.add_argument('--ratio', type=float, default=0.1, help='max ratio of CFX loss')
+    parser.add_argument('--warm_up_epoch_pct', type=float, default=0.1, help='warm up epoch percentage')
+    parser.add_argument('--linear_scaling_epoch_pct', type=float, default=0.7,
+                        help='percentage of epochs that linearly scale the ratio')
     parser.add_argument('--tightness', choices=["ours", "ibp", "crownibp", "none"], default="ours",
                         help='the tightness of the bound. None means not using the bound.')
     parser.add_argument('--inc_regenerate', action='store_true',
@@ -361,6 +440,9 @@ if __name__ == '__main__':
     parser.add_argument('--epsilon', type=float, default=1e-2, help='epsilon for IBP')
     parser.add_argument('--bias_epsilon', type=float, default=1e-3, help='bias epsilon for IBP')
     args = parser.parse_args()
+    args.fixed_ratio_epoch_pct = 1 - args.linear_scaling_epoch_pct - args.warm_up_epoch_pct
+    assert 0 <= args.warm_up_epoch_pct <= 1 and 0 <= args.linear_scaling_epoch_pct <= 1 and \
+           0 <= args.fixed_ratio_epoch_pct <= 1
     with open(args.config, 'r') as f:
         args.config = json.load(f)
     args.lr = args.config["lr"]

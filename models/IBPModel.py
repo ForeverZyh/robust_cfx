@@ -6,6 +6,8 @@ from auto_LiRPA.perturbations import *
 from utils.utilities import seed_everything, FAKE_INF, EPS, FNNDims, get_loss_by_type, get_max_loss_by_type
 from models.inn import Node, Interval
 
+SCALE_EPS = 5
+
 
 class VerifyModel(nn.Module):
     def __init__(self, model, dummy_input_shape, loss_func="mse"):
@@ -170,7 +172,15 @@ class VerifyModel(nn.Module):
         can_cfx_pred_invalid = torch.where(y == 0, (lb <= 0) & (clb <= 0), (ub > 0) & (cub > 0))
         return can_cfx_pred_invalid, torch.where(y == 0, clb, cub)
 
-    def get_loss(self, x, y, cfx_x, is_cfx, lambda_ratio=1.0, loss_type="ours"):
+    def get_loss_ori(self, x, y):
+        x = x.float()
+        ori_output = self.forward_point_weights_bias(x)
+        ori_output = torch.sigmoid(ori_output[:, 1] - ori_output[:, 0])
+        ori_loss = self.loss_func(ori_output, y.float())
+        return ori_loss.mean()
+
+    def get_loss_cfx(self, x, y, cfx_x, is_cfx, lambda_ratio=1.0, loss_type="ours", correct_pred_only=False,
+                     valid_cfx_only=False):
         '''
             x is data
             y is ground-truth label
@@ -178,32 +188,36 @@ class VerifyModel(nn.Module):
         # convert x to float32
         assert loss_type in ["ours", "ibp", "crownibp", "none"]
         x = x.float()
-        ori_output = self.forward_point_weights_bias(x)
+        pred = self.forward_point_weights_bias(x)
+        y_hat = torch.sigmoid(pred[:, 1] - pred[:, 0]).detach()
+        y_hat_hard = pred.argmax(dim=1).detach()
         # print(ori_output)
-        ori_output = torch.sigmoid(ori_output[:, 1] - ori_output[:, 0])
-        ori_loss = self.loss_func(ori_output, y.float())
         if lambda_ratio == 0 or loss_type == "none":
-            return ori_loss.mean()
+            return 0
         max_loss = get_max_loss_by_type(self.loss_func_str)
         if cfx_x is None:
-            return ori_loss.mean() + lambda_ratio * max_loss
+            return lambda_ratio * max_loss
         # print(ori_loss)
 
         if loss_type == "ours":
-            _, cfx_output = self.get_diffs_binary(x, cfx_x, y)
+            _, cfx_output = self.get_diffs_binary(x, cfx_x, y_hat_hard)
         elif loss_type == "ibp":
-            _, cfx_output = self.get_diffs_binary_ibp(x, cfx_x, y)
+            _, cfx_output = self.get_diffs_binary_ibp(x, cfx_x, y_hat_hard)
         elif loss_type == "crownibp":
-            _, cfx_output = self.get_diffs_binary_crownibp(x, cfx_x, y)
+            _, cfx_output = self.get_diffs_binary_crownibp(x, cfx_x, y_hat_hard)
         # if the cfx is valid and the original prediction is correct, then we use the cfx loss
-        is_real_cfx = is_cfx & torch.where(y == 0, ori_output <= 0.5, ori_output > 0.5)
+        is_real_cfx = torch.ones_like(is_cfx)
+        if correct_pred_only:
+            is_real_cfx = is_real_cfx & torch.where(y == 0, y_hat <= 0.5, y_hat > 0.5)
+        if valid_cfx_only:
+            is_real_cfx = is_real_cfx & is_cfx
         # print(is_real_cfx, cfx_output)
         cfx_output = torch.sigmoid(cfx_output)
-        cfx_loss = self.loss_func(cfx_output, 1.0 - y)
+        cfx_loss = self.loss_func(cfx_output, 1.0 - y_hat)
         # print(cfx_loss)
         cfx_loss = torch.where(is_real_cfx, cfx_loss, max_loss)
         # print(cfx_loss)
-        return (ori_loss + lambda_ratio * cfx_loss).mean()
+        return (lambda_ratio * cfx_loss).mean()
 
     def save(self, filename):
         filename += ".pt"
@@ -219,17 +233,28 @@ class VerifyModel(nn.Module):
 
 
 class BoundedLinear(nn.Module):
+    cnt = 0
+
     def __init__(self, input_dim, out_dim, epsilon, bias_epsilon, norm=np.inf):
         super(BoundedLinear, self).__init__()
-        self.epsilon = epsilon
-        self.bias_epsilon = bias_epsilon
-        self.ptb_weight = PerturbationLpNorm(norm=norm, eps=epsilon)
-        self.ptb_bias = PerturbationLpNorm(norm=norm, eps=bias_epsilon)
+        self.epsilon = epsilon if not isinstance(epsilon, list) else epsilon[BoundedLinear.cnt] / SCALE_EPS
+        BoundedLinear.cnt += 1
+        self.bias_epsilon = bias_epsilon if not isinstance(bias_epsilon, list) else bias_epsilon[
+                                                                                        BoundedLinear.cnt] / SCALE_EPS
+        BoundedLinear.cnt += 1
+        self.ptb_weight = PerturbationLpNorm(norm=norm, eps=self.epsilon)
+        self.ptb_bias = PerturbationLpNorm(norm=norm, eps=self.bias_epsilon)
         self.linear = nn.Linear(input_dim, out_dim)
-        if epsilon > 0:
+        if self.epsilon > 0:
             self.linear.weight = BoundedParameter(self.linear.weight.data, self.ptb_weight)
-        if bias_epsilon > 0:
+        if self.bias_epsilon > 0:
             self.linear.bias = BoundedParameter(self.linear.bias.data, self.ptb_bias)
+
+    def set_eps_ratio(self, eps_ratio):
+        if self.epsilon > 0:
+            self.ptb_weight.eps = self.epsilon * eps_ratio
+        if self.bias_epsilon > 0:
+            self.ptb_bias.eps = self.bias_epsilon * eps_ratio
 
     def forward(self, x):
         return self.linear(x)
@@ -244,6 +269,10 @@ class BoundedLinear(nn.Module):
         x = F.linear(x, weights, bias)
         cfx = F.linear(cfx, weights, bias)
         return x, cfx
+
+    def difference(self, other):
+        return np.array([np.max(np.abs(self.linear.weight.data.numpy() - other.linear.weight.data.numpy())),
+                         np.max(np.abs(self.linear.bias.data.numpy() - other.linear.bias.data.numpy()))])
 
 
 class LinearBlock(nn.Module):
@@ -270,7 +299,6 @@ class LinearBlock(nn.Module):
 class MultilayerPerception(nn.Module):
     def __init__(self, dims, epsilon, bias_epsilon, activation, dropout):
         super().__init__()
-        layers = []
         num_blocks = len(dims)
         self.blocks = []
         for i in range(1, num_blocks):
@@ -285,6 +313,18 @@ class MultilayerPerception(nn.Module):
         for block in self.blocks:
             x = block.forward_with_noise(*x)
         return x
+
+    def set_eps_ratio(self, eps_ratio):
+        for block in self.blocks:
+            block.linear.set_eps_ratio(eps_ratio)
+
+    def difference(self, other):
+        ds = []
+        for block, block1 in zip(self.blocks, other.blocks):
+            ds.append(block.linear.difference(block1.linear))
+        ds = np.array(ds)
+        print(ds)
+        return np.max(ds, axis=0)
 
 
 class FNN(nn.Module):
@@ -320,6 +360,12 @@ class FNN(nn.Module):
         x = self.final_fc.forward_with_noise(*x)
         return x
 
+    def difference(self, other):
+        d1 = self.encoder.difference(other.encoder)
+        d2 = self.final_fc.difference(other.final_fc)
+        print(d1, d2)
+        return np.maximum(d1, d2)
+
     def to_Inn(self):
         num_layers = len(self.num_hiddens) + 2  # count input and output layers
         nodes = {}
@@ -330,28 +376,39 @@ class FNN(nn.Module):
         nodes[num_layers - 1] = [Node(num_layers - 1, 0)]
         weights = {}
         biases = {}
+        eps_id = 0
         for i in range(num_layers - 2):
             layer = self.encoder.blocks[i].linear.linear
             ws = layer.weight.data.numpy()
             bs = layer.bias.data.numpy()
+            epsilon = self.epsilon if not isinstance(self.epsilon, list) else self.epsilon[eps_id] / SCALE_EPS
+            eps_id += 1
+            bias_epsilon = self.bias_epsilon if not isinstance(self.bias_epsilon, list) else self.bias_epsilon[
+                                                                                                 eps_id] / SCALE_EPS
+            eps_id += 1
             for node_from in nodes[i]:
                 for node_to in nodes[i + 1]:
                     # round by 4 decimals
                     w_val = round(ws[node_to.index][node_from.index], 8)
-                    weights[(node_from, node_to)] = Interval(w_val, w_val - self.epsilon, w_val + self.epsilon)
+                    weights[(node_from, node_to)] = Interval(w_val, w_val - epsilon, w_val + epsilon)
                     b_val = round(bs[node_to.index], 8)
-                    biases[node_to] = Interval(b_val, b_val - self.bias_epsilon, b_val + self.bias_epsilon)
+                    biases[node_to] = Interval(b_val, b_val - bias_epsilon, b_val + bias_epsilon)
 
         layer = self.final_fc.linear
         ws = layer.weight.data.numpy()
         bs = layer.bias.data.numpy()
+        epsilon = self.epsilon if not isinstance(self.epsilon, list) else self.epsilon[eps_id] / SCALE_EPS
+        eps_id += 1
+        bias_epsilon = self.bias_epsilon if not isinstance(self.bias_epsilon, list) else self.bias_epsilon[
+                                                                                             eps_id] / SCALE_EPS
+        eps_id += 1
         for node_from in nodes[num_layers - 2]:
             for node_to in nodes[num_layers - 1]:
                 # round by 4 decimals
                 w_val = round(ws[1][node_from.index] - ws[0][node_from.index], 8)
-                weights[(node_from, node_to)] = Interval(w_val, w_val - self.epsilon * 2, w_val + self.epsilon * 2)
+                weights[(node_from, node_to)] = Interval(w_val, w_val - epsilon * 2, w_val + epsilon * 2)
                 b_val = round(bs[1] - bs[0], 8)
-                biases[node_to] = Interval(b_val, b_val - self.bias_epsilon * 2, b_val + self.bias_epsilon * 2)
+                biases[node_to] = Interval(b_val, b_val - bias_epsilon * 2, b_val + bias_epsilon * 2)
 
         return num_layers, nodes, weights, biases
 
@@ -388,6 +445,18 @@ class EncDec(nn.Module):
         pred = self.final_fc(h)
         return e, h, pred
 
+    def set_eps_ratio(self, eps_ratio):
+        self.encoder.set_eps_ratio(eps_ratio)
+        self.decoder.set_eps_ratio(eps_ratio)
+        self.final_fc.set_eps_ratio(eps_ratio)
+
+    def difference(self, other):
+        d1 = self.encoder.difference(other.encoder)
+        d2 = self.decoder.difference(other.decoder)
+        d3 = self.final_fc.difference(other.final_fc)
+        print(d1, d2, d3)
+        return np.maximum(np.maximum(d1, d2), d3)
+
     def to_Inn(self):
         num_layers = 1 + len(self.enc_dims.hidden_dims) + len(
             self.dec_dims.hidden_dims) + 1  # count input and output layers
@@ -403,41 +472,57 @@ class EncDec(nn.Module):
         nodes[num_layers - 1] = [Node(num_layers - 1, 0)]
         weights = {}
         biases = {}
+        eps_id = 0
         for i in range(len(self.encoder.blocks)):
             layer = self.encoder.blocks[i].linear.linear
             ws = layer.weight.data.numpy()
             bs = layer.bias.data.numpy()
+            epsilon = self.epsilon if not isinstance(self.epsilon, list) else self.epsilon[eps_id] / SCALE_EPS
+            eps_id += 1
+            bias_epsilon = self.bias_epsilon if not isinstance(self.bias_epsilon, list) else self.bias_epsilon[
+                                                                                                 eps_id] / SCALE_EPS
+            eps_id += 1
             for node_from in nodes[i]:
                 for node_to in nodes[i + 1]:
                     # round by 4 decimals
                     w_val = round(ws[node_to.index][node_from.index], 8)
-                    weights[(node_from, node_to)] = Interval(w_val, w_val - self.epsilon, w_val + self.epsilon)
+                    weights[(node_from, node_to)] = Interval(w_val, w_val - epsilon, w_val + epsilon)
                     b_val = round(bs[node_to.index], 8)
-                    biases[node_to] = Interval(b_val, b_val - self.bias_epsilon, b_val + self.bias_epsilon)
+                    biases[node_to] = Interval(b_val, b_val - bias_epsilon, b_val + bias_epsilon)
 
         for j in range(len(self.decoder.blocks)):
             layer = self.decoder.blocks[j].linear.linear
             ws = layer.weight.data.numpy()
             bs = layer.bias.data.numpy()
             i = inter_layer_id + j
+            epsilon = self.epsilon if not isinstance(self.epsilon, list) else self.epsilon[eps_id] / SCALE_EPS
+            eps_id += 1
+            bias_epsilon = self.bias_epsilon if not isinstance(self.bias_epsilon, list) else self.bias_epsilon[
+                                                                                                 eps_id] / SCALE_EPS
+            eps_id += 1
             for node_from in nodes[i]:
                 for node_to in nodes[i + 1]:
                     # round by 4 decimals
                     w_val = round(ws[node_to.index][node_from.index], 8)
-                    weights[(node_from, node_to)] = Interval(w_val, w_val - self.epsilon, w_val + self.epsilon)
+                    weights[(node_from, node_to)] = Interval(w_val, w_val - epsilon, w_val + epsilon)
                     b_val = round(bs[node_to.index], 8)
-                    biases[node_to] = Interval(b_val, b_val - self.bias_epsilon, b_val + self.bias_epsilon)
+                    biases[node_to] = Interval(b_val, b_val - bias_epsilon, b_val + bias_epsilon)
 
         layer = self.final_fc.linear
         ws = layer.weight.data.numpy()
         bs = layer.bias.data.numpy()
+        epsilon = self.epsilon if not isinstance(self.epsilon, list) else self.epsilon[eps_id] / SCALE_EPS
+        eps_id += 1
+        bias_epsilon = self.bias_epsilon if not isinstance(self.bias_epsilon, list) else self.bias_epsilon[
+                                                                                             eps_id] / SCALE_EPS
+        eps_id += 1
         for node_from in nodes[num_layers - 2]:
             for node_to in nodes[num_layers - 1]:
                 # round by 4 decimals
                 w_val = round(ws[1][node_from.index] - ws[0][node_from.index], 8)
-                weights[(node_from, node_to)] = Interval(w_val, w_val - self.epsilon * 2, w_val + self.epsilon * 2)
+                weights[(node_from, node_to)] = Interval(w_val, w_val - epsilon * 2, w_val + epsilon * 2)
                 b_val = round(bs[1] - bs[0], 8)
-                biases[node_to] = Interval(b_val, b_val - self.bias_epsilon * 2, b_val + self.bias_epsilon * 2)
+                biases[node_to] = Interval(b_val, b_val - bias_epsilon * 2, b_val + bias_epsilon * 2)
 
         return num_layers, nodes, weights, biases
 
@@ -474,17 +559,32 @@ class CounterNet(nn.Module):
     def forward_point_weights_bias(self, x):
         return self.encoder_net_ori(x)
 
-    def get_loss(self, x, y, cfx, is_cfx, ratio, loss_type="ours"):
-        return self.get_predictor_loss(x, y, cfx, is_cfx, ratio, loss_type) + self.get_explainer_loss(x, y, True)
+    def difference(self, other):
+        return self.encoder_net_ori.difference(other.encoder_net_ori)
 
-    def get_predictor_loss(self, x, y, cfx, is_cfx, ratio, loss_type="ours"):
-        return self.encoder_verify.get_loss(x, y, cfx, is_cfx, ratio, loss_type) * self.lambda_1
+    def get_loss(self, x, y, cfx, y_hat, y_prime_hat, is_cfx, ratio, loss_type="ours"):
+        return self.get_predictor_loss(x, y) + \
+               self.encoder_verify.get_loss_cfx(x, y, cfx, is_cfx, ratio, loss_type) + \
+               self.get_explainer_loss(x, cfx, y_hat, y_prime_hat)
 
-    def get_explainer_loss(self, x, y, hard=True):
-        cfx, _ = self.forward(x, hard)
-        pred = self.encoder_net_ori.forward(cfx)
+    def get_predictor_loss(self, x, y):
+        return self.encoder_verify.get_loss_ori(x, y) * self.lambda_1
+
+    def get_cfx_loss_pred(self, x, y, cfx, is_cfx, ratio, loss_type="ours"):
+        """
+        cfx loss on the predictor side, the cfx does not have gradient, thus, not updating the explainer
+        """
+        return self.encoder_verify.get_loss_cfx(x, y, cfx, is_cfx, ratio, loss_type, correct_pred_only=True)
+
+    def get_cfx_loss_exp(self, x, y, cfx, is_cfx, ratio, loss_type="ours"):
+        """
+        cfx loss on the explainer side, the cfx has gradient to update the explainer
+        """
+        return self.encoder_verify.get_loss_cfx(x, y, cfx, is_cfx, ratio, loss_type)
+
+    def get_explainer_loss(self, x, cfx, y_hat, y_prime_hat):  # use y_hat as the ground truth
         return self.loss_2(x.float(), cfx).mean() * self.lambda_2 + \
-               self.loss_3(torch.sigmoid(pred[:, 1] - pred[:, 0]), 1.0 - y).mean() * self.lambda_3
+               self.loss_3(y_prime_hat, 1.0 - y_hat).mean() * self.lambda_3
 
     def save(self, filename):
         torch.save(self.encoder_net_ori.state_dict(), filename + "_encoder_net_ori.pt")

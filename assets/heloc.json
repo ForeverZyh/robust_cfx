@@ -1,33 +1,61 @@
 {
-    "dataset_name": "heloc",
-    "encoder_dims": [
-      100,
-      10
-    ],
-    "decoder_dims": [
-      10,
-      10
-    ],
-    "explainer_dims": [
-      10,
-      100
-    ],
-    "FNN_dims": [
-      100,
-      10,
-      10
-    ],
-    "lr": 0.005,
-    "batch_size": 128,
-    "loss_1": "mse",
-    "loss_2": "mse",
-    "loss_3": "mse",
-    "lambda_1": 1.0,
-    "lambda_2": 0.1,
-    "lambda_3": 0.5,
-    "dropout": 0.3,
-    "act": 0.01,
-    "clip_grad_norm": 0.5,
-    "weight_decay": 0.05
-  }
+  "dataset_name": "heloc",
+  "encoder_dims": [
+    100,
+    10
+  ],
+  "decoder_dims": [
+    10,
+    10
+  ],
+  "explainer_dims": [
+    10,
+    100
+  ],
+  "FNN_dims": [
+    100,
+    10,
+    10
+  ],
+  "lr": 0.005,
+  "batch_size": 128,
+  "loss_1": "mse",
+  "loss_2": "mse",
+  "loss_3": "mse",
+  "lambda_1": 1.0,
+  "lambda_2": 0.1,
+  "lambda_3": 0.5,
+  "dropout": 0.3,
+  "act": 0.01,
+  "clip_grad_norm": 0.5,
+  "weight_decay": 0.4,
+  "l2_norm_bound": [
+    2.97443027,
+    0.31287297,
+    1.80273856,
+    0.29262861,
+    1.28569913,
+    0.36519377,
+    1.03531871,
+    0.22645145,
+    1.86818796,
+    0.56759396,
+    1.95693015,
+    0.44362398
+  ],
+  "eps_per_layer": [
+    0.06202116,
+    0.0312873,
+    0.0570076,
+    0.09253729,
+    0.12856991,
+    0.11548441,
+    0.2315043,
+    0.16012535,
+    0.04177395,
+    0.0567594,
+    0.04080481,
+    0.092502
+  ]
+}
   
