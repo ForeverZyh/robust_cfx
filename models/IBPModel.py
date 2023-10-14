@@ -6,8 +6,6 @@ from auto_LiRPA.perturbations import *
 from utils.utilities import seed_everything, FAKE_INF, EPS, FNNDims, get_loss_by_type, get_max_loss_by_type
 from models.inn import Node, Interval
 
-SCALE_EPS = 5
-
 
 class VerifyModel(nn.Module):
     def __init__(self, model, dummy_input_shape, loss_func="mse"):
@@ -233,28 +231,32 @@ class VerifyModel(nn.Module):
 
 
 class BoundedLinear(nn.Module):
-    cnt = 0
-
-    def __init__(self, input_dim, out_dim, epsilon, bias_epsilon, norm=np.inf):
+    def __init__(self, input_dim, out_dim, epsilon_ratio, norm=np.inf):
         super(BoundedLinear, self).__init__()
-        self.epsilon = epsilon if not isinstance(epsilon, list) else epsilon[BoundedLinear.cnt] / SCALE_EPS
-        BoundedLinear.cnt += 1
-        self.bias_epsilon = bias_epsilon if not isinstance(bias_epsilon, list) else bias_epsilon[
-                                                                                        BoundedLinear.cnt] / SCALE_EPS
-        BoundedLinear.cnt += 1
-        self.ptb_weight = PerturbationLpNorm(norm=norm, eps=self.epsilon)
-        self.ptb_bias = PerturbationLpNorm(norm=norm, eps=self.bias_epsilon)
+        self.epsilon_ratio = epsilon_ratio
         self.linear = nn.Linear(input_dim, out_dim)
-        if self.epsilon > 0:
+        self.ptb_weight = PerturbationLpNorm(norm=norm, eps=0)
+        self.ptb_bias = PerturbationLpNorm(norm=norm, eps=0)
+        self.update_eps()
+        if self.epsilon_ratio > 0:
             self.linear.weight = BoundedParameter(self.linear.weight.data, self.ptb_weight)
-        if self.bias_epsilon > 0:
             self.linear.bias = BoundedParameter(self.linear.bias.data, self.ptb_bias)
 
+    def update_eps(self, eps_ratio=None):
+        if eps_ratio is None:
+            eps_ratio = self.epsilon_ratio
+        self.ptb_weight.eps = eps_ratio * self.linear.weight.data.norm(1).item() / self.linear.weight.data.numel()
+        self.ptb_bias.eps = eps_ratio * self.linear.bias.data.norm(1).item() / self.linear.bias.data.numel()
+
     def set_eps_ratio(self, eps_ratio):
-        if self.epsilon > 0:
-            self.ptb_weight.eps = self.epsilon * eps_ratio
-        if self.bias_epsilon > 0:
-            self.ptb_bias.eps = self.bias_epsilon * eps_ratio
+        if self.epsilon_ratio > 0:
+            self.update_eps(eps_ratio * self.epsilon_ratio)
+
+    def to_inn(self):
+        bs = self.linear.bias.data.numpy()
+        ws = self.linear.weight.data.numpy()
+        self.update_eps()
+        return ws, bs, self.ptb_weight.eps, self.ptb_bias.eps
 
     def forward(self, x):
         return self.linear(x)
@@ -276,9 +278,9 @@ class BoundedLinear(nn.Module):
 
 
 class LinearBlock(nn.Module):
-    def __init__(self, input_dim, out_dim, epsilon, bias_epsilon, activation, dropout):
+    def __init__(self, input_dim, out_dim, epsilon_ratio, activation, dropout):
         super().__init__()
-        self.linear = BoundedLinear(input_dim, out_dim, epsilon, bias_epsilon)
+        self.linear = BoundedLinear(input_dim, out_dim, epsilon_ratio)
         if dropout == 0:
             self.block = activation()
         else:
@@ -297,12 +299,12 @@ class LinearBlock(nn.Module):
 
 
 class MultilayerPerception(nn.Module):
-    def __init__(self, dims, epsilon, bias_epsilon, activation, dropout):
+    def __init__(self, dims, epsilon_ratio, activation, dropout):
         super().__init__()
         num_blocks = len(dims)
         self.blocks = []
         for i in range(1, num_blocks):
-            self.blocks.append(LinearBlock(dims[i - 1], dims[i], epsilon, bias_epsilon, activation, dropout=dropout))
+            self.blocks.append(LinearBlock(dims[i - 1], dims[i], epsilon_ratio, activation, dropout=dropout))
         self.model = nn.Sequential(*self.blocks)
 
     def forward(self, x):
@@ -318,6 +320,10 @@ class MultilayerPerception(nn.Module):
         for block in self.blocks:
             block.linear.set_eps_ratio(eps_ratio)
 
+    def update_eps(self, eps_ratio=None):
+        for block in self.blocks:
+            block.linear.update_eps(eps_ratio)
+
     def difference(self, other):
         ds = []
         for block, block1 in zip(self.blocks, other.blocks):
@@ -328,7 +334,7 @@ class MultilayerPerception(nn.Module):
 
 
 class FNN(nn.Module):
-    def __init__(self, num_inputs, num_outputs, num_hiddens: list, epsilon=0.0, bias_epsilon=0.0, activation=nn.ReLU,
+    def __init__(self, num_inputs, num_outputs, num_hiddens: list, epsilon_ratio=0.0, activation=nn.ReLU,
                  dropout=0):
         super(FNN, self).__init__()
         self.num_inputs = num_inputs
@@ -336,10 +342,9 @@ class FNN(nn.Module):
         self.activation = activation
         self.dropout = dropout
         dims = [num_inputs] + num_hiddens
-        self.encoder = MultilayerPerception(dims, epsilon, bias_epsilon, activation, dropout=0)  # set dropout to 0
-        self.final_fc = BoundedLinear(num_hiddens[-1], num_outputs, epsilon, bias_epsilon)
-        self.epsilon = epsilon
-        self.bias_epsilon = bias_epsilon
+        self.encoder = MultilayerPerception(dims, epsilon_ratio, activation, dropout=0)  # set dropout to 0
+        self.final_fc = BoundedLinear(num_hiddens[-1], num_outputs, epsilon_ratio)
+        self.epsilon_ratio = epsilon_ratio
 
     def forward(self, x):
         x = x.float()  # necessary for Counterfactual generation to work
@@ -376,16 +381,8 @@ class FNN(nn.Module):
         nodes[num_layers - 1] = [Node(num_layers - 1, 0)]
         weights = {}
         biases = {}
-        eps_id = 0
         for i in range(num_layers - 2):
-            layer = self.encoder.blocks[i].linear.linear
-            ws = layer.weight.data.numpy()
-            bs = layer.bias.data.numpy()
-            epsilon = self.epsilon if not isinstance(self.epsilon, list) else self.epsilon[eps_id] / SCALE_EPS
-            eps_id += 1
-            bias_epsilon = self.bias_epsilon if not isinstance(self.bias_epsilon, list) else self.bias_epsilon[
-                                                                                                 eps_id] / SCALE_EPS
-            eps_id += 1
+            ws, bs, epsilon, bias_epsilon = self.encoder.blocks[i].linear.to_inn()
             for node_from in nodes[i]:
                 for node_to in nodes[i + 1]:
                     # round by 4 decimals
@@ -394,14 +391,7 @@ class FNN(nn.Module):
                     b_val = round(bs[node_to.index], 8)
                     biases[node_to] = Interval(b_val, b_val - bias_epsilon, b_val + bias_epsilon)
 
-        layer = self.final_fc.linear
-        ws = layer.weight.data.numpy()
-        bs = layer.bias.data.numpy()
-        epsilon = self.epsilon if not isinstance(self.epsilon, list) else self.epsilon[eps_id] / SCALE_EPS
-        eps_id += 1
-        bias_epsilon = self.bias_epsilon if not isinstance(self.bias_epsilon, list) else self.bias_epsilon[
-                                                                                             eps_id] / SCALE_EPS
-        eps_id += 1
+        ws, bs, epsilon, bias_epsilon = self.final_fc.to_inn()
         for node_from in nodes[num_layers - 2]:
             for node_to in nodes[num_layers - 1]:
                 # round by 4 decimals
@@ -414,21 +404,19 @@ class FNN(nn.Module):
 
 
 class EncDec(nn.Module):
-    def __init__(self, enc_dims: FNNDims, dec_dims: FNNDims, num_outputs, epsilon=0.0, bias_epsilon=0.0,
-                 activation=nn.ReLU,
+    def __init__(self, enc_dims: FNNDims, dec_dims: FNNDims, num_outputs, epsilon_ratio=0.0, activation=nn.ReLU,
                  dropout=0):
         super(EncDec, self).__init__()
         self.activation = activation
         self.dropout = dropout
         self.enc_dims = enc_dims
         self.dec_dims = dec_dims
-        self.encoder = MultilayerPerception([enc_dims.in_dim] + enc_dims.hidden_dims, epsilon, bias_epsilon, activation,
+        self.encoder = MultilayerPerception([enc_dims.in_dim] + enc_dims.hidden_dims, epsilon_ratio, activation,
                                             dropout=dropout)
-        self.decoder = MultilayerPerception([dec_dims.in_dim] + dec_dims.hidden_dims, epsilon, bias_epsilon, activation,
+        self.decoder = MultilayerPerception([dec_dims.in_dim] + dec_dims.hidden_dims, epsilon_ratio, activation,
                                             dropout=dropout)
-        self.final_fc = BoundedLinear(dec_dims.hidden_dims[-1], num_outputs, epsilon, bias_epsilon)
-        self.epsilon = epsilon
-        self.bias_epsilon = bias_epsilon
+        self.final_fc = BoundedLinear(dec_dims.hidden_dims[-1], num_outputs, epsilon_ratio)
+        self.epsilon_ratio = epsilon_ratio
 
     def forward(self, x):
         x = x.float()  # necessary for Counterfactual generation to work
@@ -449,6 +437,11 @@ class EncDec(nn.Module):
         self.encoder.set_eps_ratio(eps_ratio)
         self.decoder.set_eps_ratio(eps_ratio)
         self.final_fc.set_eps_ratio(eps_ratio)
+
+    def update_eps(self, eps_ratio=None):
+        self.encoder.update_eps(eps_ratio)
+        self.decoder.update_eps(eps_ratio)
+        self.final_fc.update_eps(eps_ratio)
 
     def difference(self, other):
         d1 = self.encoder.difference(other.encoder)
@@ -472,16 +465,8 @@ class EncDec(nn.Module):
         nodes[num_layers - 1] = [Node(num_layers - 1, 0)]
         weights = {}
         biases = {}
-        eps_id = 0
         for i in range(len(self.encoder.blocks)):
-            layer = self.encoder.blocks[i].linear.linear
-            ws = layer.weight.data.numpy()
-            bs = layer.bias.data.numpy()
-            epsilon = self.epsilon if not isinstance(self.epsilon, list) else self.epsilon[eps_id] / SCALE_EPS
-            eps_id += 1
-            bias_epsilon = self.bias_epsilon if not isinstance(self.bias_epsilon, list) else self.bias_epsilon[
-                                                                                                 eps_id] / SCALE_EPS
-            eps_id += 1
+            ws, bs, epsilon, bias_epsilon = self.encoder.blocks[i].linear.to_inn()
             for node_from in nodes[i]:
                 for node_to in nodes[i + 1]:
                     # round by 4 decimals
@@ -491,15 +476,8 @@ class EncDec(nn.Module):
                     biases[node_to] = Interval(b_val, b_val - bias_epsilon, b_val + bias_epsilon)
 
         for j in range(len(self.decoder.blocks)):
-            layer = self.decoder.blocks[j].linear.linear
-            ws = layer.weight.data.numpy()
-            bs = layer.bias.data.numpy()
+            ws, bs, epsilon, bias_epsilon = self.decoder.blocks[j].linear.to_inn()
             i = inter_layer_id + j
-            epsilon = self.epsilon if not isinstance(self.epsilon, list) else self.epsilon[eps_id] / SCALE_EPS
-            eps_id += 1
-            bias_epsilon = self.bias_epsilon if not isinstance(self.bias_epsilon, list) else self.bias_epsilon[
-                                                                                                 eps_id] / SCALE_EPS
-            eps_id += 1
             for node_from in nodes[i]:
                 for node_to in nodes[i + 1]:
                     # round by 4 decimals
@@ -508,14 +486,7 @@ class EncDec(nn.Module):
                     b_val = round(bs[node_to.index], 8)
                     biases[node_to] = Interval(b_val, b_val - bias_epsilon, b_val + bias_epsilon)
 
-        layer = self.final_fc.linear
-        ws = layer.weight.data.numpy()
-        bs = layer.bias.data.numpy()
-        epsilon = self.epsilon if not isinstance(self.epsilon, list) else self.epsilon[eps_id] / SCALE_EPS
-        eps_id += 1
-        bias_epsilon = self.bias_epsilon if not isinstance(self.bias_epsilon, list) else self.bias_epsilon[
-                                                                                             eps_id] / SCALE_EPS
-        eps_id += 1
+        ws, bs, epsilon, bias_epsilon = self.final_fc.to_inn()
         for node_from in nodes[num_layers - 2]:
             for node_to in nodes[num_layers - 1]:
                 # round by 4 decimals
@@ -529,18 +500,18 @@ class EncDec(nn.Module):
 
 class CounterNet(nn.Module):
     def __init__(self, enc_dims: FNNDims, pred_dims: FNNDims, exp_dims: FNNDims, num_outputs,
-                 epsilon=0.0, bias_epsilon=0.0, activation=nn.ReLU, dropout=0, preprocessor=None,
+                 epsilon_ratio=0.0, activation=nn.ReLU, dropout=0, preprocessor=None,
                  config=None):
         super(CounterNet, self).__init__()
         assert enc_dims.is_before(pred_dims)
         assert enc_dims.is_before(exp_dims)
         exp_dims.in_dim += pred_dims.hidden_dims[-1]  # add the prediction outputs to the explanation
-        self.encoder_net_ori = EncDec(enc_dims, pred_dims, num_outputs, epsilon, bias_epsilon, activation, 0)
+        self.encoder_net_ori = EncDec(enc_dims, pred_dims, num_outputs, epsilon_ratio, activation, 0)
         self.dummy_input_shape = (2, enc_dims.in_dim)
         self.loss_1 = config["loss_1"]
         self.encoder_verify = VerifyModel(self.encoder_net_ori, self.dummy_input_shape, loss_func=self.loss_1)
         self.explainer = nn.Sequential(
-            MultilayerPerception([exp_dims.in_dim] + exp_dims.hidden_dims, 0, 0, activation, dropout),
+            MultilayerPerception([exp_dims.in_dim] + exp_dims.hidden_dims, 0, activation, dropout),
             nn.Linear(exp_dims.hidden_dims[-1], enc_dims.in_dim))
         self.preprocessor = preprocessor  # for normalization
         self.loss_2 = get_loss_by_type(config["loss_2"])

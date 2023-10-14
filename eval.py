@@ -124,8 +124,6 @@ if __name__ == "__main__":
     parser.add_argument('--wachter_lam_init', type=float, default=1e-3, help='initial lambda for wachter')
     parser.add_argument('--wachter_max_lam_steps', type=int, default=10, help='max lambda steps for wachter')
 
-    parser.add_argument('--epsilon', type=float, default=1e-2, help='epsilon for IBP')
-    parser.add_argument('--bias_epsilon', type=float, default=1e-3, help='bias epsilon for IBP')
     parser.add_argument('--seed', type=int, default=0, help='random seed')
     parser.add_argument('--generate_only', action='store_true',
                         help='if true, only generate and save cfx, do not eval robustness')

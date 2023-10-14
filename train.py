@@ -193,10 +193,10 @@ def train_IBP(train_data, test_data, model: VerifyModel, cfx_method, onehot, fil
 
 
 def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
-    # optimizer_1 = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.config["weight_decay"])
-    # optimizer_2 = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.config["weight_decay"])
-    optimizer_1 = torch.optim.Adam(model.parameters(), lr=args.lr)
-    optimizer_2 = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer_1 = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.config["weight_decay"])
+    optimizer_2 = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.config["weight_decay"])
+    # optimizer_1 = torch.optim.Adam(model.parameters(), lr=args.lr)
+    # optimizer_2 = torch.optim.Adam(model.parameters(), lr=args.lr)
     cfx_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=False)  # for CFX test
     ori_train_len = len(train_data)
     val_size = int(ori_train_len // 8)  # 1/8 of the training set is used for validation
@@ -282,7 +282,8 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.config["clip_grad_norm"])
             optimizer_1.step()
-            scale_params()
+            model.encoder_net_ori.update_eps()
+            # scale_params()
 
         # if ratio > 0 and args.tightness != "none":
         #     for batch, (X, y, idx) in enumerate(train_dataloader):
@@ -313,7 +314,8 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), args.config["clip_grad_norm"])
             optimizer_2.step()
-            scale_params()
+            model.encoder_net_ori.update_eps()
+            # scale_params()
 
         wandb_log.update({"predictor_loss": predictor_loss / len(train_data),
                           "explainer_loss": explainer_loss / len(train_data),
@@ -345,7 +347,6 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
 
 
 def prepare_data_and_model(args):
-    BoundedLinear.cnt = 0
     ret = {"preprocessor": None, "train_data": None, "test_data": None, "model": None, "minmax": None}
     if args.config["dataset_name"] == "german_credit":
         if args.cfx == 'proto':
@@ -390,8 +391,7 @@ def prepare_data_and_model(args):
         pred_dims = FNNDims(None, args.config["decoder_dims"])
         exp_dims = FNNDims(None, args.config["explainer_dims"])
         model = CounterNet(enc_dims, pred_dims, exp_dims, 2,
-                           epsilon=args.config["eps_per_layer"],
-                           bias_epsilon=args.config["eps_per_layer"],
+                           epsilon_ratio=args.config["eps_ratio"],
                            activation=act, dropout=args.config["dropout"], preprocessor=preprocessor,
                            config=args.config)
     else:
@@ -437,8 +437,6 @@ if __name__ == '__main__':
                         help='the tightness of the bound. None means not using the bound.')
     parser.add_argument('--inc_regenerate', action='store_true',
                         help='whether to regenerate CFXs incrementally for those that are no longer CFX each time')
-    parser.add_argument('--epsilon', type=float, default=1e-2, help='epsilon for IBP')
-    parser.add_argument('--bias_epsilon', type=float, default=1e-3, help='bias epsilon for IBP')
     args = parser.parse_args()
     args.fixed_ratio_epoch_pct = 1 - args.linear_scaling_epoch_pct - args.warm_up_epoch_pct
     assert 0 <= args.warm_up_epoch_pct <= 1 and 0 <= args.linear_scaling_epoch_pct <= 1 and \

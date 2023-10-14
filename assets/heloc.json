@@ -28,7 +28,7 @@
   "dropout": 0.3,
   "act": 0.01,
   "clip_grad_norm": 0.5,
-  "weight_decay": 0.4,
+  "weight_decay": 0.05,
   "l2_norm_bound": [
     2.97443027,
     0.31287297,
@@ -56,6 +56,7 @@
     0.0567594,
     0.04080481,
     0.092502
-  ]
+  ],
+  "eps_ratio": 0.2
 }
   

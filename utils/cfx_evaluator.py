@@ -31,8 +31,8 @@ class CFXEvaluator:
         pred_y_cor_train = self.model_ori.forward_point_weights_bias(torch.tensor(self.train_data.X).float()).argmax(
             dim=-1) == torch.tensor(self.train_data.y)
 
-        ret += "Epsilon: " + str(self.inn.delta) + "\n"
-        ret += "Bias Epsilon: " + str(self.inn.bias_delta) + "\n"
+        # ret += "Epsilon: " + str(self.inn.delta) + "\n"
+        # ret += "Bias Epsilon: " + str(self.inn.bias_delta) + "\n"
 
         # Accuracy
         ret += f"Model test accuracy: {round(total_cor / len(pred_y_cor) * 100, 2)}%" \

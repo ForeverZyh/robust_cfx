@@ -32,10 +32,8 @@ class Inn:
     biases: dict of {Node, Interval}
     """
 
-    def __init__(self, num_layers, delta, bias_delta, nodes, weights, biases):
+    def __init__(self, num_layers, nodes, weights, biases):
         self.num_layers = num_layers
-        self.delta = delta
-        self.bias_delta = bias_delta
         self.nodes = nodes
         self.weights = weights
         self.biases = biases
@@ -43,7 +41,5 @@ class Inn:
 
     @classmethod
     def from_IBPModel(cls, model):
-        delta = model.epsilon
-        bias_delta = model.bias_epsilon
         num_layers, nodes, weights, biases = model.to_Inn()
-        return cls(num_layers, delta, bias_delta, nodes, weights, biases)
+        return cls(num_layers, nodes, weights, biases)
