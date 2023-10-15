@@ -32,6 +32,14 @@ def get_cfx(file):
         return 'wachter'
     elif 'proto' in file:
         return 'proto'
+    elif 'counternetours' in file:
+        return 'counternetours'
+    elif 'counternetibp' in file:
+        return 'counternetibp'
+    elif 'counternetcrownibp' in file:
+        return 'counternetcrownibp'
+    elif 'counternet' in file:
+        return 'counternet'
     else:
         print("error: can't identify CFX generation method")
         return -1
@@ -62,26 +70,30 @@ def main(args):
         training_method = get_training_method(file)
         cfx = get_cfx(file)
 
-        epsilon = float(lines[0].split(" ")[-1].split("\n")[0])
-        bias_epsilon = float(lines[1].split(" ")[-1].split("\n")[0])
-        test_acc = float(lines[2].split(" ")[-2].split("%")[0])/100
-        train_acc = float(lines[3].split(" ")[-2].split("%")[0])/100
-        validity = float(lines[4].split(" ")[-2].split("%")[0])/100
-        robustness_us = float(lines[5].split(" ")[-2].split("%")[0])/100
-        robustness_mlp = float(lines[6].split(" ")[-2].split("%")[0])/100
-        bounds_better = int(lines[7].split(" ")[0])
-        total_samples_w_cfx = int(lines[4].split("/")[1].split(")")[0])
-        bounds_better_frac = bounds_better/total_samples_w_cfx
-        proximity = float(lines[8].split(" ")[-3].split(",")[0])
-        proximity_std = float(lines[8].split(" ")[-1].split("\n")[0])
-        sparsity = float(lines[9].split(" ")[-3].split(",")[0])
-        sparsity_std = float(lines[9].split(" ")[-1].split("\n")[0])
-        data_manifold_dist = float(lines[10].split(" ")[-3].split(",")[0])
-        data_manifold_dist_std = float(lines[10].split(" ")[-1].split("\n")[0])
+        # epsilon = float(lines[0].split(" ")[-1].split("\n")[0])
+        # bias_epsilon = float(lines[1].split(" ")[-1].split("\n")[0])
+        try:
+            lines = ["", ""] + lines
+            test_acc = float(lines[2].split(" ")[-2].split("%")[0])/100
+            train_acc = float(lines[3].split(" ")[-2].split("%")[0])/100
+            validity = float(lines[4].split(" ")[-2].split("%")[0])/100
+            robustness_us = float(lines[5].split(" ")[-2].split("%")[0])/100
+            robustness_mlp = float(lines[6].split(" ")[-2].split("%")[0])/100
+            bounds_better = int(lines[7].split(" ")[0])
+            total_samples_w_cfx = int(lines[4].split("/")[1].split(")")[0])
+            bounds_better_frac = bounds_better/total_samples_w_cfx
+            proximity = float(lines[8].split(" ")[-3].split(",")[0])
+            proximity_std = float(lines[8].split(" ")[-1].split("\n")[0])
+            sparsity = float(lines[9].split(" ")[-3].split(",")[0])
+            sparsity_std = float(lines[9].split(" ")[-1].split("\n")[0])
+            data_manifold_dist = float(lines[10].split(" ")[-3].split(",")[0])
+            data_manifold_dist_std = float(lines[10].split(" ")[-1].split("\n")[0])
+        except:
+            continue
 
         if args.verbose:
-            print("eps: ", epsilon)
-            print("bias_eps: ", bias_epsilon)
+            # print("eps: ", epsilon)
+            # print("bias_eps: ", bias_epsilon)
             print("test_acc: ", test_acc)
             print("train_acc: ", train_acc)
             print("validity: ", validity)
@@ -94,13 +106,13 @@ def main(args):
             print("sparsity_std: ", sparsity_std)
             print("data_manifold_dist: ", data_manifold_dist)
             print("data_manifold_dist_std: ", data_manifold_dist_std)
-        data = [dataset, training_method, cfx, epsilon, bias_epsilon, test_acc, train_acc, validity, 
+        data = [dataset, training_method, cfx, test_acc, train_acc, validity,
                 robustness_us, robustness_mlp, bounds_better_frac, proximity, proximity_std, 
                 sparsity, sparsity_std, data_manifold_dist, data_manifold_dist_std]
         all_data.append(data)
 
 
-    columns = ['dataset', 'training_method', 'cfx', 'epsilon', 'bias_epsilon', 'test_acc',
+    columns = ['dataset', 'training_method', 'cfx', 'test_acc',
                 'train_acc', 'validity', 'robustness_us', 'robustness_mlp', 'bounds_better_frac', 
                 'proximity', 'proximity_std', 'sparsity', 'sparsity_std', 'data_manifold_dist', 
                 'data_manifold_dist_std']
