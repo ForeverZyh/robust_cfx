@@ -265,9 +265,9 @@ class BoundedLinear(nn.Module):
         # only for test use
         layer = self.linear
         weights = layer.weight.data + (
-                0.5 - torch.rand(layer.weight.data.shape)) * 2 * self.epsilon
+                0.5 - torch.rand(layer.weight.data.shape)) * 2 * self.ptb_weight.eps
         bias = layer.bias.data + (
-                0.5 - torch.rand(layer.bias.data.shape)) * 2 * self.bias_epsilon
+                0.5 - torch.rand(layer.bias.data.shape)) * 2 * self.ptb_bias.eps
         x = F.linear(x, weights, bias)
         cfx = F.linear(cfx, weights, bias)
         return x, cfx
@@ -534,9 +534,10 @@ class CounterNet(nn.Module):
         return self.encoder_net_ori.difference(other.encoder_net_ori)
 
     def get_loss(self, x, y, cfx, y_hat, y_prime_hat, is_cfx, ratio, loss_type="ours"):
+        losses = self.get_explainer_loss(x, cfx, y_hat, y_prime_hat)
         return self.get_predictor_loss(x, y) + \
                self.encoder_verify.get_loss_cfx(x, y, cfx, is_cfx, ratio, loss_type) + \
-               self.get_explainer_loss(x, cfx, y_hat, y_prime_hat)
+               losses[0] + losses[1]
 
     def get_predictor_loss(self, x, y):
         return self.encoder_verify.get_loss_ori(x, y) * self.lambda_1
@@ -554,7 +555,7 @@ class CounterNet(nn.Module):
         return self.encoder_verify.get_loss_cfx(x, y, cfx, is_cfx, ratio, loss_type)
 
     def get_explainer_loss(self, x, cfx, y_hat, y_prime_hat):  # use y_hat as the ground truth
-        return self.loss_2(x.float(), cfx).mean() * self.lambda_2 + \
+        return self.loss_2(x.float(), cfx).mean() * self.lambda_2, \
                self.loss_3(y_prime_hat, 1.0 - y_hat).mean() * self.lambda_3
 
     def save(self, filename):

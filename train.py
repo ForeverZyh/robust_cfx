@@ -252,7 +252,8 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
 
         model.train()
         predictor_loss = 0
-        explainer_loss = 0
+        explainer_loss1 = 0
+        explainer_loss2 = 0
         cfx_loss_pred = 0
         cfx_loss_exp = 0
         scales = []
@@ -305,8 +306,10 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
             y_prime_hat = model.encoder_net_ori.forward(cfx)
             y_prime_hat = torch.sigmoid(y_prime_hat[:, 1] - y_prime_hat[:, 0])
             y_prime_hat_hard = y_prime_hat > 0.5
-            loss = model.get_explainer_loss(X, cfx, y_hat, y_prime_hat)
-            explainer_loss += loss.item() * X.shape[0]
+            losses = model.get_explainer_loss(X, cfx, y_hat, y_prime_hat)
+            explainer_loss1 += losses[0].item() * X.shape[0]
+            explainer_loss2 += losses[1].item() * X.shape[0]
+            loss = losses[0] + losses[1]
             if ratio > 0:
                 loss1 = model.get_cfx_loss_exp(X, y, cfx, y_hat_hard != y_prime_hat_hard, ratio, args.tightness)
                 cfx_loss_exp += loss1.item() * X.shape[0]
@@ -318,13 +321,15 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
             # scale_params()
 
         wandb_log.update({"predictor_loss": predictor_loss / len(train_data),
-                          "explainer_loss": explainer_loss / len(train_data),
+                          "explainer_loss1": explainer_loss1 / len(train_data),
+                          "explainer_loss2": explainer_loss2 / len(train_data),
                           "cfx_loss_pred": cfx_loss_pred / len(train_data),
                           "cfx_loss_exp": cfx_loss_exp / len(train_data),
                           "scales": np.mean(scales)})
         if args.wandb is None:
             print("predictor_loss: ", predictor_loss / len(train_data))
-            print("explainer_loss: ", explainer_loss / len(train_data))
+            print("explainer_loss1: ", explainer_loss1 / len(train_data))
+            print("explainer_loss2: ", explainer_loss2 / len(train_data))
             print("cfx_loss_pred: ", cfx_loss_pred / len(train_data))
             print("cfx_loss_exp: ", cfx_loss_exp / len(train_data))
 
@@ -457,6 +462,9 @@ if __name__ == '__main__':
         args.ratio = 0
         args.cfx_generation_freq = args.epoch + 1  # never generate cfx
         args.tightness = "none"
+    else:
+        if "ratio" in args.config:
+            args.ratio = args.config["ratio"]
 
     ret = prepare_data_and_model(args)
 

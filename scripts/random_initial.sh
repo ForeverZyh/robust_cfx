@@ -15,7 +15,7 @@ len=${#datasets[@]}
 ibp_approaches=(
   'ibp'
   'crownibp'
-  'ours'
+#  'ours'
 )
 
 for ((i = 0; i < MODEL_CNT; i++)); do
