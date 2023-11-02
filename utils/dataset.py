@@ -122,6 +122,66 @@ CTG_FEAT = {
     20: DataType.CONTINUOUS_REAL, # Tendency
 }
 
+STUDENT_FEAT = {
+    0: DataType.CONTINUOUS_REAL, # num_prev_attempts
+    1: DataType.CONTINUOUS_REAL, # weight
+    2: DataType.CONTINUOUS_REAL, # weighted_score
+    3: DataType.CONTINUOUS_REAL, # forumng_click
+    4: DataType.CONTINUOUS_REAL, # homepage_click
+    5: DataType.CONTINUOUS_REAL, # oucontent_click
+    6: DataType.CONTINUOUS_REAL, # resource_click
+    7: DataType.CONTINUOUS_REAL, # subpage_click
+    8: DataType.CONTINUOUS_REAL, # url click
+    9: DataType.CONTINUOUS_REAL, # dataplus_click
+    10: DataType.CONTINUOUS_REAL, # glossary_click
+    11: DataType.CONTINUOUS_REAL, # ou_collaborate_click
+    12: DataType.CONTINUOUS_REAL, # quiz_click
+    13: DataType.CONTINUOUS_REAL, # ouelluminate_click
+    14: DataType.CONTINUOUS_REAL, # sharedsubpage_click
+    15: DataType.CONTINUOUS_REAL, # questionnaire_click
+    16: DataType.CONTINUOUS_REAL, # page_click
+    17: DataType.CONTINUOUS_REAL, # externalquiz_click
+    18: DataType.CONTINUOUS_REAL, # ouwiki_click
+    19: DataType.CONTINUOUS_REAL, # dualpane_click
+    20: DataType.CONTINUOUS_REAL, # folder_click
+    21: DataType.CONTINUOUS_REAL, # repeatactivity_click
+    22: DataType.CONTINUOUS_REAL, # htmlactivity_click
+    23: DataType.DISCRETE, # code_module
+    24: DataType.DISCRETE, # gender
+    25: DataType.DISCRETE, # region
+    26: DataType.DISCRETE, # highest_education
+    27: DataType.DISCRETE, # imd_band
+    28: DataType.DISCRETE, # age_band
+    29: DataType.DISCRETE, # studied_credits
+    30: DataType.DISCRETE, # disability
+}
+
+TAIWAN_FEAT = {
+    0: DataType.CONTINUOUS_REAL, # limit bal
+    1: DataType.CONTINUOUS_REAL, # age
+    2: DataType.CONTINUOUS_REAL, # pay 0
+    3: DataType.CONTINUOUS_REAL, # pay 2
+    4: DataType.CONTINUOUS_REAL, # pay 3
+    5: DataType.CONTINUOUS_REAL, # pay 4
+    6: DataType.CONTINUOUS_REAL, # pay 5
+    7: DataType.CONTINUOUS_REAL, # pay 6
+    8: DataType.CONTINUOUS_REAL, # bill 1
+    9: DataType.CONTINUOUS_REAL, # bill 2
+    10: DataType.CONTINUOUS_REAL, # bill 3
+    11: DataType.CONTINUOUS_REAL, # bill 4
+    12: DataType.CONTINUOUS_REAL, # bill 5
+    13: DataType.CONTINUOUS_REAL, # bill 6
+    14: DataType.CONTINUOUS_REAL, # pay 1
+    15: DataType.CONTINUOUS_REAL, # pay 2
+    16: DataType.CONTINUOUS_REAL, # pay 3
+    17: DataType.CONTINUOUS_REAL, # pay 4
+    18: DataType.CONTINUOUS_REAL, # pay 5
+    19: DataType.CONTINUOUS_REAL, # pay 6
+    20: DataType.DISCRETE, # sex
+    21: DataType.DISCRETE, # education
+    22: DataType.DISCRETE, # marriage
+}
+
 ORDINAL_FEATURES_CREDIT = {"installment_rate": 4, "present_residence": 4, "number_credits": 4}
 DISCRETE_FEATURES_CREDIT = {"status": 4, "credit_history": 5, "purpose": 10, "savings": 5, "employment_duration": 5,
                             "personal_status_sex": 4, "other_debtors": 3, "property": 4, "other_installment_plans": 3,
@@ -334,7 +394,15 @@ class Preprocessor:
             cat_idx = self.feature_var_map[col][0]
             cat_end_idx = self.feature_var_map[col][0] + self.discrete[col].long().item()
             if hard:
-                x[:, cat_idx: cat_end_idx] = F.gumbel_softmax(x[:, cat_idx: cat_end_idx], hard=hard)
+                # gumbel_softmax sometimes gives NAN, let it try again if so. Fallback on regular softmax.
+                tmp_x = F.gumbel_softmax(x[:, cat_idx: cat_end_idx], hard=hard)
+                for i in range(2):
+                    # gumbel_softmax sometimes returns nan, give it 2 changes to fix itself
+                    if tmp_x.isnan().any():
+                        tmp_x = F.gumbel_softmax(x[:, cat_idx: cat_end_idx], hard=hard)
+                if tmp_x.isnan().any():
+                    tmp_x = F.softmax(x[:, cat_idx: cat_end_idx], dim=-1)
+                x[:, cat_idx: cat_end_idx] = tmp_x
             else:
                 x[:, cat_idx: cat_end_idx] = F.softmax(x[:, cat_idx: cat_end_idx], dim=-1)
 

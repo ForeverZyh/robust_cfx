@@ -1,0 +1,30 @@
+{
+    "dataset_name": "student",
+    "encoder_dims": [
+        127,
+        100,
+        10
+    ],
+    "decoder_dims": [
+        10,
+        10
+    ],
+    "explainer_dims": [
+        10,
+        100
+    ],
+    "lr": 0.0002,
+    "batch_size": 128,
+    "loss_1": "mse",
+    "loss_2": "mse",
+    "loss_3": "mse",
+    "lambda_1": 1.0,
+    "lambda_2": 0.01,
+    "lambda_3": 0.2,
+    "dropout" : 0.3,
+    "act" : 0.01,
+    "clip_grad_norm": 0.5,
+    "weight_decay": 0.05,
+    "eps_ratio": 0.15,
+    "ratio": 0.05
+}

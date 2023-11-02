@@ -14,12 +14,13 @@ epsilon and bias_epsilon.
 '''
 
 def main(args):
-    if args.dataset == 'german':
-        config = 'assets/german_credit.json'
-    elif args.dataset == 'heloc':
-        config = 'assets/heloc.json'
-    elif args.dataset == 'ctg':
-        config = 'assets/ctg.json'
+    if args.config == None:
+        if args.dataset == 'german':
+            args.config = 'assets/german_credit_relu.json'
+        elif args.dataset == 'heloc':
+            args.config = 'assets/heloc.json'
+        elif args.dataset == 'ctg':
+            args.config = 'assets/ctg.json'
     epsilons = [0.001, 0.001, 0.01, 0.01]
     bias_epsilons = [0.01, 0.001, 0.01, 0.001]
     for i in range(10):
@@ -29,10 +30,10 @@ def main(args):
             logname = modelname + "_" + str(j) + ".txt"
             # eval(args = [modelname, '--config', config, '--save_dir', 'trained_models/'+ args.dataset, '--cfx_save_dir',
             #              'saved_cfxs/fromchtc', '--cfx', args.cfx, '--epsilon', e, '--bias_epsilon', be])       
-            exc_str = r"python eval.py " + modelname + r" --config " + config + r" --save_dir " + \
+            exc_str = r"python eval.py " + modelname + r" --config " + args.config + r" --save_dir " + \
                         args.model_dir +  r" --cfx_save_dir " + args.cfx_dir + r" --cfx " + args.cfx + \
                         r" --epsilon " + str(e) + r" --bias_epsilon " + str(be) + r" --log_name " + \
-                        logname + r" --cfx_filename " + modelname
+                        logname + r" --cfx_filename " + modelname + r" --log_save_dir " + args.log_output_dir
             if args.cfx == 'proto':
                 exc_str += " --onehot"
             print(exc_str)
@@ -45,6 +46,8 @@ if __name__ == "__main__":
     parser.add_argument('cfx',choices=['wachter','proto'])
     parser.add_argument('--cfx_dir', default="saved_cfxs/fromchtc", help="directory where cfxs are saved")
     parser.add_argument('--model_dir', default=None, help="directory where models are saved, if omitted will be trained_models/dataset")
+    parser.add_argument('--log_output_dir', default="logs", help="directory where logs are saved")
+    parser.add_argument('--config', type=str, default=None, help='config file, if none, use assets/dataset.json')
 
     args = parser.parse_args()
 

@@ -14,6 +14,10 @@ from utils import cfx
 from models.IBPModel import FNN, VerifyModel, CounterNet, BoundedLinear
 from utils.utilities import seed_everything, FNNDims
 
+import warnings
+
+# silence ResourceWarning
+warnings.filterwarnings("ignore", category=ResourceWarning)
 
 def eval_chunk(model, test_dataloader, val_dataloader, train_dataloader, epoch, cfx_x, is_cfx):
     model.eval()
@@ -324,8 +328,7 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
                           "explainer_loss1": explainer_loss1 / len(train_data),
                           "explainer_loss2": explainer_loss2 / len(train_data),
                           "cfx_loss_pred": cfx_loss_pred / len(train_data),
-                          "cfx_loss_exp": cfx_loss_exp / len(train_data),
-                          "scales": np.mean(scales)})
+                          "cfx_loss_exp": cfx_loss_exp / len(train_data)})
         if args.wandb is None:
             print("predictor_loss: ", predictor_loss / len(train_data))
             print("explainer_loss1: ", explainer_loss1 / len(train_data))
@@ -376,6 +379,16 @@ def prepare_data_and_model(args):
         train_data, preprocessor = dataset.load_data("data/ctg_train.csv", "label", feature_types)
         test_data, _, = dataset.load_data("data/ctg_test.csv", "label", feature_types, preprocessor)
         ret['preprocessor'] = preprocessor
+    elif args.config["dataset_name"] == "student":
+        feature_types = dataset.STUDENT_FEAT
+        train_data, preprocessor = dataset.load_data("data/student_train.csv", "final_result", feature_types)
+        test_data, _, = dataset.load_data("data/student_test.csv", "final_result", feature_types, preprocessor)
+        ret['preprocessor'] = preprocessor
+    elif args.config["dataset_name"] == "taiwan":
+        feature_types = dataset.TAIWAN_FEAT
+        train_data, preprocessor = dataset.load_data("data/taiwan_train.csv", "Y", feature_types)
+        test_data, _, = dataset.load_data("data/taiwan_test.csv", "Y", feature_types, preprocessor)
+        ret['preprocessor'] = preprocessor
     else:
         raise NotImplementedError(f"Dataset {args.config['dataset_name']} not implemented")
     ret["train_data"] = train_data
@@ -390,7 +403,8 @@ def prepare_data_and_model(args):
         raise NotImplementedError("Activation function not implemented")
 
     if args.cfx.startswith("counternet"):
-        if args.config["dataset_name"] == "german_credit":
+        # if dataset contains discrete features, we need to use one-hot encoding for counternet
+        if args.config["dataset_name"] in ["german_credit", "student", "taiwan"]:
             assert args.onehot, "Counternet should work with onehot"
         enc_dims = FNNDims(dim_in, args.config["encoder_dims"])
         pred_dims = FNNDims(None, args.config["decoder_dims"])
