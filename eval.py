@@ -100,7 +100,7 @@ def main(args):
             print("\n\n\n\n\n\n")
 
         cfx_eval = CFXEvaluator(cfx_x, is_cfx, model.encoder_verify if args.cfx == "counternet" else model, None,
-                                train_data, test_data, inn, args.log_filename)
+                                train_data, test_data, inn, args.log_filename, args.skip_milp)
         cfx_eval.log()
 
 
@@ -127,6 +127,7 @@ if __name__ == "__main__":
     parser.add_argument('--seed', type=int, default=0, help='random seed')
     parser.add_argument('--generate_only', action='store_true',
                         help='if true, only generate and save cfx, do not eval robustness')
+    parser.add_argument('--skip_milp', action='store_true', help='if true, skip MILP verification')
     args = parser.parse_args()
     with open(args.config, 'r') as f:
         args.config = json.load(f)
