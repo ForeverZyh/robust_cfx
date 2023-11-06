@@ -97,7 +97,8 @@ class CFXEvaluator:
         for i, (x, cfx_x_, is_cfx_) in enumerate(zip(self.test_data.X, self.cfx_x, is_cfx)):
             if is_cfx_:
                 proximity.append(torch.norm(torch.tensor(x) - cfx_x_, p=1).item() / len(x))
-                sparsity.append(torch.sum(torch.abs(torch.tensor(x) - cfx_x_) > TOLERANCE).item() / len(x))
+                sparsity.append(self.compute_sparsity(x, cfx_x_))
+
         ret += f"Proximity mean: {round(np.mean(proximity), 4)}, std: {round(np.std(proximity), 4)}\n"
         ret += f"Sparsity mean: {round(np.mean(sparsity), 4)}, std: {round(np.std(sparsity), 4)}\n"
 
@@ -113,6 +114,16 @@ class CFXEvaluator:
 
         return ret
 
+    def compute_sparsity(self, x, cfx_x):
+        cont_spars, discrete_spars = 0, 0
+        x_cont_feat_i = [self.train_data.feat_var_map[i][0] for i in self.train_data.continuous_features]
+        cont_spars = torch.sum(torch.abs(torch.tensor(x[x_cont_feat_i]) - cfx_x[x_cont_feat_i]) > TOLERANCE).item()
+        for i in list(self.train_data.ordinal_features) + list(self.train_data.discrete_features):
+            idxs = self.train_data.feat_var_map[i]
+            if torch.sum(torch.abs(torch.tensor(x[idxs]) - cfx_x[idxs]) > 0).item() > 0:
+                discrete_spars += 1
+        return (cont_spars + discrete_spars) / len(self.train_data.feat_var_map)
+    
     def log(self):
         if self.log_filename is not None:
             with open(self.log_filename, "w") as f:
