@@ -1,21 +1,9 @@
 wachter_models=(
-  #  'IBP_model_wacther_i100_l0_001_ls10_e50_c20_eps0_01_beps0_001.pt'
-  #  'IBP_model_wacther_i100_l0_001_ls10_e50_c20_inc_eps0_01_beps0_001.pt'
-  #  'standard_model_wacther_e50.pt'
-  #  'IBP_model_wacther_i100_l0_001_ls10_e100_c20_eps0_01_beps0_001.pt'
-  #  'IBP_model_wacther_i100_l0_001_ls10_e50_c10_eps0_01_beps0_001.pt'
-  #  'standard_model_wacther_e100.pt'
-  #  'standard_model_wacther_e200.pt'
-  #  'IBP_model_wacther_i100_l0_001_ls10_e200_c20_eps0_01_beps0_001.pt'
-  #  'IBP_model_wacther_i100_l0_001_ls10_e100_c20_eps0_01_beps0_001_r0_2.pt'
-  # 'IBP_model_wacther_i100_l0_001_ls10_e100_c20_eps0_01_beps0_001_r0_4.pt'
-  # 'IBP_model_wacther_i100_l0_001_ls10_e100_c20_eps0_01_beps0_001_r0_8.pt'
-  #  'IBP_model_wacther_i100_l0_001_ls10_e100_c20_inc_eps0_01_beps0_001_r0_2.pt'
-  #  'IBP_model_wacther_i100_l0_001_ls10_e100_c10_eps0_01_beps0_001.pt'
-  #  'ours_model_wacther_i100_l0_001_ls10_e100_c20_eps0_01_beps0_001_r0_2.pt'
-  #  'ibp_model_wacther_i100_l0_001_ls10_e100_c20_eps0_01_beps0_001_r0_2.pt'
-  #  'crown_ibp_model_wacther_i100_l0_001_ls10_e100_c20_eps0_01_beps0_001_r0_2.pt'
-  'ours_model_wacther_i100_l0_001_ls10_e100_c20_eps0_01_beps0_001_r0_4.pt'
+  'ours_model_wacther_i100_l0_001_ls10_e100_c20_eps0_05_beps0_05_r0_2'
+  'ours_model_wacther_i100_l0_001_ls10_e100_c10_eps0_05_beps0_05_r0_2'
+  'ibp_model_wacther_i100_l0_001_ls10_e100_c20_eps0_05_beps0_05_r0_2'
+  'crownibp_model_wacther_i100_l0_001_ls10_e100_c20_eps0_05_beps0_05_r0_2'
+  'ours_model_wachter'
 )
 
 wachter_max_iters=(200)
@@ -23,14 +11,6 @@ wachter_lam_inits=(1e-2 1e-3 1e-4)
 wachter_max_lam_steps=(10)
 
 proto_models=(
-  #  'IBP_model_proto_onehot_t100_e50_c20_eps0_01_beps0_001.pt'
-  #  'IBP_model_proto_onehot_t100_e50_c20_inc_eps0_01_beps0_001.pt'
-  #  'standard_model_proto_onehot_e50.pt'
-  #  'standard_model_proto_onehot_e100.pt'
-  #  'IBP_model_proto_onehot_t100_e100_c20_eps0_01_beps0_001.pt'
-  'ours_model_proto_onehot_t100_e100_c20_eps0_01_beps0_001_r0_2.pt'
-  'ibp_model_proto_onehot_t100_e100_c20_eps0_01_beps0_001_r0_2.pt'
-  'crown_ibp_model_proto_onehot_t100_e100_c20_eps0_01_beps0_001_r0_2.pt'
 )
 
 proto_thetas=(1 10 100 1000)

@@ -33,18 +33,21 @@
 #--epsilon 5e-2 --bias_epsilon 5e-2 --tightness crownibp --wandb --config assets/heloc.json --cfx_generation_freq 1 \
 #--ratio 0.2 2>&1
 
-CUDA_VISIBLE_DEVICES="" python train.py ctg_IBP_model_counternet_ibp_r0_4 --model IBP --cfx counternet --epoch 200 \
---epsilon 5e-2 --bias_epsilon 5e-2 --tightness ibp --wandb --config assets/ctg.json --cfx_generation_freq 1 \
---ratio 0.4 >/dev/null 2>&1
-CUDA_VISIBLE_DEVICES="" python train.py ctg_IBP_model_counternet_ibp_r0_8 --model IBP --cfx counternet --epoch 200 \
---epsilon 5e-2 --bias_epsilon 5e-2 --tightness ibp --wandb --config assets/ctg.json --cfx_generation_freq 1 \
---ratio 0.8 >/dev/null 2>&1
-CUDA_VISIBLE_DEVICES="" python train.py ctg_IBP_model_counternet_crownibp_r0_4 --model IBP --cfx counternet --epoch 200 \
---epsilon 5e-2 --bias_epsilon 5e-2 --tightness crownibp --wandb --config assets/ctg.json --cfx_generation_freq 1 \
---ratio 0.4 >/dev/null 2>&1
-CUDA_VISIBLE_DEVICES="" python train.py ctg_IBP_model_counternet_crownibp_r0_8 --model IBP --cfx counternet --epoch 200 \
---epsilon 5e-2 --bias_epsilon 5e-2 --tightness crownibp --wandb --config assets/ctg.json --cfx_generation_freq 1 \
---ratio 0.8 >/dev/null 2>&1
+#CUDA_VISIBLE_DEVICES="" python train.py ctg_IBP_model_counternet_ours_r0_8_e0_1 --model IBP --cfx counternet --epoch 200 \
+#--epsilon 1e-1 --bias_epsilon 1e-1 --tightness ours --wandb --config assets/ctg.json --cfx_generation_freq 1 \
+#--ratio 0.8 >/dev/null 2>&1
+#CUDA_VISIBLE_DEVICES="" python train.py ctg_IBP_model_counternet_ibp_r0_4 --model IBP --cfx counternet --epoch 200 \
+#--epsilon 5e-2 --bias_epsilon 5e-2 --tightness ibp --wandb --config assets/ctg.json --cfx_generation_freq 1 \
+#--ratio 0.4 >/dev/null 2>&1
+#CUDA_VISIBLE_DEVICES="" python train.py ctg_IBP_model_counternet_ibp_r0_8_e0_1 --model IBP --cfx counternet --epoch 200 \
+#--epsilon 1e-1 --bias_epsilon 1e-1 --tightness ibp --wandb --config assets/ctg.json --cfx_generation_freq 1 \
+#--ratio 0.8 >/dev/null 2>&1
+#CUDA_VISIBLE_DEVICES="" python train.py ctg_IBP_model_counternet_crownibp_r0_4 --model IBP --cfx counternet --epoch 200 \
+#--epsilon 5e-2 --bias_epsilon 5e-2 --tightness crownibp --wandb --config assets/ctg.json --cfx_generation_freq 1 \
+#--ratio 0.4 >/dev/null 2>&1
+#CUDA_VISIBLE_DEVICES="" python train.py ctg_IBP_model_counternet_crownibp_r0_8_e0_1 --model IBP --cfx counternet --epoch 200 \
+#--epsilon 1e-1 --bias_epsilon 1e-1 --tightness crownibp --wandb --config assets/ctg.json --cfx_generation_freq 1 \
+#--ratio 0.8 >/dev/null 2>&1
 #CUDA_VISIBLE_DEVICES="" python train.py ctg_IBP_model_counternet_ibp --model IBP --cfx counternet --epoch 200 \
 #--epsilon 5e-2 --bias_epsilon 5e-2 --tightness ibp --wandb --config assets/ctg.json --cfx_generation_freq 1 \
 #--ratio 0.2 >/dev/null 2>&1

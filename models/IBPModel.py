@@ -530,6 +530,18 @@ class CounterNet(nn.Module):
     def forward_point_weights_bias(self, x):
         return self.encoder_net_ori(x)
 
+    def predict(self, x):
+        if isinstance(x, list):
+            x = np.array(x)
+        x = torch.tensor(x)
+        return self.encoder_net_ori(x).argmax(dim=-1).numpy()
+
+    def predict_proba(self, x):
+        if isinstance(x, list):
+            x = np.array(x)
+        x = torch.tensor(x)
+        return self.encoder_net_ori(x).softmax(dim=-1).detach().numpy()
+
     def difference(self, other):
         return self.encoder_net_ori.difference(other.encoder_net_ori)
 
