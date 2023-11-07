@@ -12,7 +12,7 @@ from utils.utilities import TOLERANCE
 
 class CFXEvaluator:
     def __init__(self, cfx_x, is_cfx, model_ori, model_shift, train_data: Custom_Dataset,
-                 test_data: Custom_Dataset, inn: Inn, log_file):
+                 test_data: Custom_Dataset, inn: Inn, log_file, skip_milp=False):
         self.cfx_x = cfx_x
         self.is_cfx = is_cfx
         self.model_ori = model_ori
@@ -21,6 +21,7 @@ class CFXEvaluator:
         self.test_data = test_data
         self.inn = inn
         self.log_filename = log_file
+        self.skip_milp = skip_milp
 
     def evaluate(self):
         ret = ""
@@ -62,32 +63,33 @@ class CFXEvaluator:
         solver_robust_cnt = 0
         solver_bound_better = 0
         solver_cnt = 0
-        with tqdm.tqdm(total=len(pred_y)) as pbar:
-            for i, (x, y, cfx_x_, is_cfx_, loose_bound, our_robust) in enumerate(
-                    zip(self.test_data.X, pred_y, self.cfx_x, is_cfx, cfx_output, is_real_cfx)):
-                if is_cfx_:
-                    solver = optsolver.OptSolver(self.test_data, self.inn, 1 - y, x, mode=1, x_prime=cfx_x_)
-                    res, bound = None, None
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future = executor.submit(solver.compute_inn_bounds)
+        if not self.skip_milp:
+            with tqdm.tqdm(total=len(pred_y)) as pbar:
+                for i, (x, y, cfx_x_, is_cfx_, loose_bound, our_robust) in enumerate(
+                        zip(self.test_data.X, pred_y, self.cfx_x, is_cfx, cfx_output, is_real_cfx)):
+                    if is_cfx_:
+                        solver = optsolver.OptSolver(self.test_data, self.inn, 1 - y, x, mode=1, x_prime=cfx_x_)
+                        res, bound = None, None
+                        with concurrent.futures.ThreadPoolExecutor() as executor:
+                            future = executor.submit(solver.compute_inn_bounds)
 
-                        try:
-                            res, bound = future.result(timeout=15)
-                        except concurrent.futures.TimeoutError:
-                            print("Operation timed out")
-                    if bound is not None and abs(bound - loose_bound.item()) > TOLERANCE:
-                        solver_bound_better += 1
-                    if res is None:
-                        solver_robust_cnt += our_robust.item()
-                    elif res == 1:
-                        solver_robust_cnt += 1
-                    solver_cnt += 1
-                    pbar.set_postfix({'robust_pct': round(solver_robust_cnt / solver_cnt * 100, 2)})
-                pbar.update(1)
-        ret += f"Robustness (by the MILP solver): " \
-               f"{round(solver_robust_cnt / total_valid * 100, 2)}%" \
-               f" ({solver_robust_cnt}/{total_valid})\n"
-        ret += f"{solver_bound_better} solver bounds are better than ours.\n"
+                            try:
+                                res, bound = future.result(timeout=15)
+                            except concurrent.futures.TimeoutError:
+                                print("Operation timed out")
+                        if bound is not None and abs(bound - loose_bound.item()) > TOLERANCE:
+                            solver_bound_better += 1
+                        if res is None:
+                            solver_robust_cnt += our_robust.item()
+                        elif res == 1:
+                            solver_robust_cnt += 1
+                        solver_cnt += 1
+                        pbar.set_postfix({'robust_pct': round(solver_robust_cnt / solver_cnt * 100, 2)})
+                    pbar.update(1)
+            ret += f"Robustness (by the MILP solver): " \
+                f"{round(solver_robust_cnt / total_valid * 100, 2)}%" \
+                f" ({solver_robust_cnt}/{total_valid})\n"
+            ret += f"{solver_bound_better} solver bounds are better than ours.\n"
 
         # Proximity & Sparsity
         proximity = []
@@ -95,7 +97,8 @@ class CFXEvaluator:
         for i, (x, cfx_x_, is_cfx_) in enumerate(zip(self.test_data.X, self.cfx_x, is_cfx)):
             if is_cfx_:
                 proximity.append(torch.norm(torch.tensor(x) - cfx_x_, p=1).item() / len(x))
-                sparsity.append(torch.sum(torch.abs(torch.tensor(x) - cfx_x_) > TOLERANCE).item() / len(x))
+                sparsity.append(self.compute_sparsity(x, cfx_x_))
+
         ret += f"Proximity mean: {round(np.mean(proximity), 4)}, std: {round(np.std(proximity), 4)}\n"
         ret += f"Sparsity mean: {round(np.mean(sparsity), 4)}, std: {round(np.std(sparsity), 4)}\n"
 
@@ -111,6 +114,16 @@ class CFXEvaluator:
 
         return ret
 
+    def compute_sparsity(self, x, cfx_x):
+        cont_spars, discrete_spars = 0, 0
+        x_cont_feat_i = [self.train_data.feat_var_map[i][0] for i in self.train_data.continuous_features]
+        cont_spars = torch.sum(torch.abs(torch.tensor(x[x_cont_feat_i]) - cfx_x[x_cont_feat_i]) > TOLERANCE).item()
+        for i in list(self.train_data.ordinal_features) + list(self.train_data.discrete_features):
+            idxs = self.train_data.feat_var_map[i]
+            if torch.sum(torch.abs(torch.tensor(x[idxs]) - cfx_x[idxs]) > 0).item() > 0:
+                discrete_spars += 1
+        return (cont_spars + discrete_spars) / len(self.train_data.feat_var_map)
+    
     def log(self):
         if self.log_filename is not None:
             with open(self.log_filename, "w") as f:
