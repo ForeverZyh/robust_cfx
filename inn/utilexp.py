@@ -564,7 +564,7 @@ class UtilExp:
                     ce = x
                 CEs.append(ce)
                 is_cfx.append(self.clf.predict(ce.reshape(1, -1))[0] != label)
-                print(label, is_cfx[-1])
+                # print(label, is_cfx[-1])
                 pbar.update(1)
                 cnt += 1
                 valid += is_cfx[-1]
@@ -582,18 +582,16 @@ class UtilExp:
         return delta_valid / len(xs)
 
     def run_roar_one(self, x, cat_feats, labels, lamb1=1, lamb22=None, eps=1):
-        def predict_proba_01(X):
-            return (self.clf.predict_proba(X) > 0.5).astype(np.int32)
 
         coefficients = intercept = None
         robust_recourse = RobustRecourse(W=coefficients, W0=intercept, feature_costs=None, y_target=eps)
         with HiddenPrints():
             if lamb22 is None:
                 lamb2 = robust_recourse.choose_lambda(x.reshape(1, -1), self.clf.predict, self.train_X,
-                                                      predict_proba_01)
+                                                      self.clf.predict_logits)
             else:
                 lamb2 = lamb22
-        coefficients, intercept = lime_explanation(predict_proba_01, self.train_X, x, cat_feats=cat_feats)
+        coefficients, intercept = lime_explanation(self.clf.predict_logits, self.train_X, x, cat_feats=cat_feats)
         coefficients, intercept = np.round_(coefficients, 4), np.round_(intercept, 4)
         robust_recourse.set_W(coefficients)
         robust_recourse.set_W0(intercept)

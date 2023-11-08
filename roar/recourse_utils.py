@@ -64,16 +64,17 @@ def lime_explanation(model_pred_proba, X_train, x, cat_feats=None):
     explainer = lime.lime_tabular.LimeTabularExplainer(training_data=X_train,
                                                        categorical_features=cat_feats,
                                                        discretize_continuous=False,
-                                                       feature_selection='none')
+                                                       feature_selection='none',
+                                                       mode='regression')
     exp = explainer.explain_instance(x,
                                      model_pred_proba,
-                                     num_features=X_train.shape[1],
-                                     model_regressor=LogisticRegression(),
-                                     num_samples=20000,
-                                     top_labels=1)
-    label = exp.available_labels()[0]  # explain the first label
-    coefficients = exp.local_exp[label][0][1]
-    intercept = exp.intercept[label]
+                                     num_features=X_train.shape[1])
+    coefficients = np.zeros_like(x)
+    intercept = 0
+    for i, c in exp.local_exp[1]:
+        coefficients[i] = c / explainer.scaler.scale_[i]
+        intercept += - c * explainer.scaler.mean_[i] / explainer.scaler.scale_[i]
+    intercept = np.array([exp.intercept[1] + intercept])
     return coefficients, intercept
 
 

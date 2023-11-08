@@ -542,6 +542,13 @@ class CounterNet(nn.Module):
         x = torch.tensor(x)
         return self.encoder_net_ori(x).softmax(dim=-1).detach().numpy()
 
+    def predict_logits(self, x):
+        if isinstance(x, list):
+            x = np.array(x)
+        x = torch.tensor(x)
+        ret = self.encoder_net_ori(x).detach().numpy()
+        return ret[:, 1] - ret[:, 0]
+
     def difference(self, other):
         return self.encoder_net_ori.difference(other.encoder_net_ori)
 

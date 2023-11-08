@@ -46,14 +46,14 @@ def main(args):
             util_exp = UtilExp(model, preprocessor, train_data.X, test_data.X)
             util_exp.inn_delta_non_0 = model.encoder_net_ori.to_Inn()
             cfx_x, is_cfx = util_exp.run_ROAR(labels=preds.numpy())
-            util_exp.evaluate_ces([x if y else None for x, y in zip(cfx_x, is_cfx)])
+            # util_exp.evaluate_ces([x if y else None for x, y in zip(cfx_x, is_cfx)])
             with open(cfx_filename, 'wb') as f:
                 pickle.dump((cfx_x, is_cfx), f)
 
         with open(cfx_filename, 'rb') as f:
             cfx_x, is_cfx = pickle.load(f)
-            cfxs.append(cfx_x)
-            is_cfxs.append(is_cfx)
+            cfxs.append(np.array(cfx_x))
+            is_cfxs.append(np.array(is_cfx))
 
     all_data = []
     l2_norms = []
@@ -75,8 +75,8 @@ def main(args):
                     print(models[i].difference(models[j]))
                 this_model = models[i]
                 these_preds = all_preds[i]
-                these_cfx = cfxs[j]
-                these_is_cfx = is_cfxs[j]
+                these_cfx = torch.tensor(cfxs[j])
+                these_is_cfx = torch.tensor(is_cfxs[j])
 
                 cfx_preds = this_model.forward_point_weights_bias(these_cfx.float()).argmax(dim=1)
 
