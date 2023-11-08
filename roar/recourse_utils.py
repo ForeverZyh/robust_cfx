@@ -71,9 +71,14 @@ def lime_explanation(model_pred_proba, X_train, x, cat_feats=None):
                                      num_features=X_train.shape[1])
     coefficients = np.zeros_like(x)
     intercept = 0
+    cat_feats = set(cat_feats)
     for i, c in exp.local_exp[1]:
-        coefficients[i] = c / explainer.scaler.scale_[i]
-        intercept += - c * explainer.scaler.mean_[i] / explainer.scaler.scale_[i]
+        if i not in cat_feats:
+            coefficients[i] = c / explainer.scaler.scale_[i]
+            intercept += - c * explainer.scaler.mean_[i] / explainer.scaler.scale_[i]
+        else:
+            coefficients[i] = 0
+            intercept += c
     intercept = np.array([exp.intercept[1] + intercept])
     return coefficients, intercept
 

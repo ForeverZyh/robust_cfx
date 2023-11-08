@@ -544,10 +544,10 @@ class UtilExp:
         is_cfx = []
         # find categorical features
         cat_feats = []
-        for v in self.preprocessor.discrete.values():
-            cat_feats.extend(v)
-        for v in self.preprocessor.ordinal.values():
-            cat_feats.extend(v)
+        cont_feats = set(self.preprocessor.cont_features)
+        for v in self.preprocessor.feature_var_map:
+            if v not in cont_feats:
+                cat_feats.extend(self.preprocessor.feature_var_map[v])
         cat_feats.sort()
         start_time = time.time()
         valid = 0
@@ -588,7 +588,7 @@ class UtilExp:
         with HiddenPrints():
             if lamb22 is None:
                 lamb2 = robust_recourse.choose_lambda(x.reshape(1, -1), self.clf.predict, self.train_X,
-                                                      self.clf.predict_logits)
+                                                      self.clf.predict_logits, cat_feats=cat_feats)
             else:
                 lamb2 = lamb22
         coefficients, intercept = lime_explanation(self.clf.predict_logits, self.train_X, x, cat_feats=cat_feats)
@@ -596,6 +596,8 @@ class UtilExp:
         robust_recourse.set_W(coefficients)
         robust_recourse.set_W0(intercept)
         r, delta_r = robust_recourse.get_recourse(x, lamb1=lamb1, lamb2=lamb2)
+        if len(cat_feats) > 0:
+            r[cat_feats] = x[cat_feats]
         if r is not None:
             return r, lamb2
         else:

@@ -119,6 +119,10 @@ if __name__ == "__main__":
         args.config = 'assets/heloc.json'
     elif args.dataset == 'ctg':
         args.config = 'assets/ctg.json'
+    elif args.dataset == 'taiwan':
+        args.config = 'assets/taiwan.json'
+    elif args.dataset == 'student':
+        args.config = 'assets/student.json'
     with open(args.config, 'r') as f:
         args.config = json.load(f)
 
