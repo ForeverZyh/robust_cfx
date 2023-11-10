@@ -25,6 +25,6 @@
     "act" : 0.01,
     "clip_grad_norm": 0.5,
     "weight_decay": 0.05,
-    "eps_ratio": 0.15,
+    "eps_ratio": 0.2,
     "ratio": 0.05
 }

@@ -21,6 +21,7 @@ tf.get_logger().setLevel(40)
 tf.compat.v1.disable_v2_behavior()
 
 
+
 def get_flattened_weight_and_bias(clf, weights=True, biases=True):
     if not weights and not biases:
         return 0
@@ -292,7 +293,7 @@ class HiddenPrints:
 
 
 class UtilExp:
-    def __init__(self, clf, preprocessor, train_X, test_instances):
+    def __init__(self, clf, preprocessor, train_X, test_instances, test_labels, dataset = None):
         self.clf = clf
         self.preprocessor = preprocessor
         # self.num_layers = get_clf_num_layers(clf)
@@ -309,13 +310,14 @@ class UtilExp:
         # self.desired_class = desired_class
         # self.num_test_instances = num_test_instances
 
-        self.dataset = None
+        self.dataset = dataset
         self.delta_min = -1
         self.Mmax = None
         self.delta_max = 0  # inf-d(clf, Mmax)
         self.lof = None
         self.train_X = train_X
         self.test_instances = test_instances
+        self.test_labels = test_labels
         self.inn_delta_non_0 = None
         self.inn_delta_0 = None
 
@@ -485,56 +487,62 @@ class UtilExp:
         print("delta validity:", delta_valids / len(self.test_instances))
         print("m2 validity:", m2_valids / len(self.test_instances))
 
-    def run_ours_custom_delta(self, delta):
-        return self.run_ours(robust=True, delta=delta)
+    def run_INN_custom_delta(self, delta):
+        return self.run_INN(robust=True, delta=delta)
 
-    def run_ours_max_robust(self):
+    def run_INN_max_robust(self):
         delta = round(self.delta_max * 1.02, 4)
-        return self.run_ours(robust=True, delta=delta)
+        return self.run_INN(robust=True, delta=delta)
 
-    def run_ours_robust(self):
-        return self.run_ours(robust=True, delta=None)
+    def run_INN_robust(self):
+        return self.run_INN(robust=True, delta=None)
 
-    def run_ours_non_robust(self):
-        return self.run_ours(robust=False, delta=None)
+    def run_INN_non_robust(self):
+        return self.run_INN(robust=False, delta=None)
 
-    def run_ours(self, robust=False, delta=None):
+    def run_INN(self, robust=False, delta=None):
         start_time = time.time()
         CEs = []
-        for i, x in tqdm(enumerate(self.test_instances)):
+        is_cfx = []
+        for i, (x,y) in tqdm(enumerate(zip(self.test_instances, self.test_labels))):
             if robust is False:
-                this_cf = self.run_ours_one(x)
+                this_cf = self.run_INN_one(x, y)
             else:
-                this_cf = self.run_ours_one_delta_robust(x, delta=delta)
+                this_cf = self.run_INN_one_delta_robust(x, delta=delta)
             CEs.append(this_cf)
+            print("\ndiff", (x-this_cf).sum())
+            print("y: ",y)
+            print("pred is ",self.clf.predict(this_cf.reshape(1,-1)))
+            is_cfx.append(self.clf.predict(this_cf.reshape(1, -1))[0] != y)
         print("total computation time in s:", time.time() - start_time)
         assert len(CEs) == len(self.test_instances)
-        return CEs
+        return CEs, is_cfx
 
-    def run_ours_one(self, x):
-        y_prime = 1 if self.clf.predict(x.reshape(1, -1))[0] == 0 else 0
-        this_solver = OptSolver(self.dataset, self.inn_delta_0, y_prime, x, mode=0, eps=0.01, x_prime=None)
+    def run_INN_one(self, x, y):
+        y_prime = 1 if y == 0 else 0
+        # changing inn_delta_0 to inn_delta-non_0 here and in next fx
+        this_solver = OptSolver(self.dataset, self.inn_delta_non_0, y_prime, x, mode=0, eps=0.01, x_prime=None)
         this_cf = this_solver.compute_counterfactual()
         if this_cf is None:
             return this_cf
         else:
             return np.round(this_cf, 5)
 
-    def run_ours_one_delta_robust(self, x, delta=None):
+    def run_INN_one_delta_robust(self, x, delta=None):
         y_prime = 1 if self.clf.predict(x.reshape(1, -1))[0] == 0 else 0
         eps = 0.01
-        this_solver = OptSolver(self.dataset, self.inn_delta_0, y_prime, x, mode=0, eps=0.01, x_prime=None)
+        this_solver = OptSolver(self.dataset, self.inn_delta_non_0, y_prime, x, mode=0, eps=0.01, x_prime=None)
         this_cf = this_solver.compute_counterfactual()
         count = 0
         if delta is None:  # default, delta=self.delta_min
             while self.is_robust(x, this_cf) != 1 and this_cf is not None and eps <= 20:
-                this_solver = OptSolver(self.dataset, self.inn_delta_0, y_prime, x, mode=0, eps=eps, x_prime=None)
+                this_solver = OptSolver(self.dataset, self.inn_delta_non_0, y_prime, x, mode=0, eps=eps, x_prime=None)
                 this_cf = this_solver.compute_counterfactual()
                 eps += 0.2
                 count += 1
         else:
             while self.is_robust_custom_delta(x, this_cf, delta=delta) != 1 and this_cf is not None:
-                this_solver = OptSolver(self.dataset, self.inn_delta_0, y_prime, x, mode=0, eps=eps, x_prime=None)
+                this_solver = OptSolver(self.dataset, self.inn_delta_non_0, y_prime, x, mode=0, eps=eps, x_prime=None)
                 this_cf = this_solver.compute_counterfactual()
                 eps += 0.2
         return this_cf

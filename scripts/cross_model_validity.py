@@ -8,6 +8,13 @@ import pandas as pd
 import torch
 
 from train import prepare_data_and_model
+try:
+    from get_chtc_mapping import get_roar_mapping, get_chtc_num
+except:
+    pass
+
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 '''
 Given a set of 10 models trained on the same dataset with different seeds, 
@@ -20,14 +27,17 @@ samples that had a valid CFX.
 
 warnings.filterwarnings("ignore", category=ResourceWarning)
 
-
 def main(args):
     models = []
     cfxs = []
     is_cfxs = []
     all_preds = []
     for i in range(args.model_cnt):
-        args.model = args.model_type + args.dataset + args.cfx + str(i)
+        try:
+            chtcnum = get_chtc_num(args.model_type, args.dataset, args.epoch, args.cfx_technique, args.eps, args.r)
+        except:
+            chtcnum = ""
+        args.model = args.model_type + args.dataset + chtcnum + "_" + str(i)
         ret = prepare_data_and_model(args)
         train_data, test_data, model, minmax = ret["train_data"], ret["test_data"], ret["model"], ret["minmax"]
         model.load(os.path.join(args.model_dir, args.model))
@@ -38,11 +48,19 @@ def main(args):
         all_preds.append(preds)
 
         # load cfx
-        cfx_filename = os.path.join(args.cfx_dir, args.model_type + args.dataset + args.cfx + str(i))
+        if args.cfx_technique == 'roar':
+            try:
+                basefile = get_roar_mapping(chtcnum)
+            except:
+                basefile = args.model_type + args.dataset + "_"
+        else:
+            basefile = args.model_type + args.dataset + chtcnum + "_"
+        cfx_filename = os.path.join(args.cfx_dir, basefile + str(i))
         with open(cfx_filename, 'rb') as f:
             cfx_x, is_cfx = pickle.load(f)
-            cfxs.append(cfx_x)
-            is_cfxs.append(is_cfx)
+            cfxs.append(torch.tensor(cfx_x))
+            is_cfxs.append(torch.tensor(is_cfx))
+        print(torch.tensor(cfx_x).shape)
 
     all_data = []
     l2_norms = []
@@ -59,7 +77,7 @@ def main(args):
                 l2_norm_normeds.append([l2_norm_normed])
         for j in range(args.model_cnt):
             if i != j:
-                if i < j:
+                if i < j and args.verbose:
                     print(f"==={i} vs. {j}")
                     print(models[i].difference(models[j]))
                 this_model = models[i]
@@ -67,6 +85,8 @@ def main(args):
                 these_cfx = cfxs[j]
                 these_is_cfx = is_cfxs[j]
 
+
+                print(cfxs[j].shape)
                 cfx_preds = this_model.forward_point_weights_bias(these_cfx.float()).argmax(dim=1)
 
                 is_valid = torch.where(these_is_cfx, these_preds != cfx_preds, torch.tensor([False]))
@@ -78,36 +98,43 @@ def main(args):
 
     l2_norms = np.mean(np.array(l2_norms), axis=-1)
     l2_norm_normeds = np.mean(np.array(l2_norm_normeds), axis=-1)
-    print(l2_norms, l2_norm_normeds)
+    if args.verbose:
+        print(l2_norms, l2_norm_normeds)
     df = pd.DataFrame(all_data, columns=['validity_all', 'validity_for_cfx'])
     if not os.path.exists(os.path.join("logs", "validity")):
         os.makedirs(os.path.join("logs", "validity"))
-    df.to_csv(os.path.join("logs", "validity", args.model_type + args.dataset + args.cfx + ".csv"), index=False)
+    df.to_csv(os.path.join("logs", "validity", args.model_type + args.dataset + chtcnum + "e" + str(args.epoch) \
+                            + "eps" + str(args.eps) + "r" + str(args.r) + ".csv"), index=False)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("dataset")
     parser.add_argument("model_type", help="Standard or IBP", choices=["Standard", "IBP"])
-    parser.add_argument("cfx", help="wachter or proto")
-    parser.add_argument("--cfx_dir", default="saved_cfxs/fromchtc", help="directory where cfxs are saved")
+    parser.add_argument("cfx_technique", help="ours, ibp, crownibp, or none")
+    parser.add_argument("--cfx_dir", default="saved_cfxs", help="directory where cfxs are saved")
     parser.add_argument("--model_dir", default='trained_models',
-                        help="directory where models are saved, if omitted will be trained_models/dataset")
+                        help="directory where models are saved, if omitted will be trained_models")
     parser.add_argument('--onehot', action='store_true', help='whether to use one-hot encoding')
     parser.add_argument('--model_cnt', type=int, default=10, help='how many models trained for each dataset')
+    parser.add_argument('--verbose', action='store_true')
+    parser.add_argument("--epoch", type=int, default=100)
+    parser.add_argument('--eps', type=float, default=0.2)
+    parser.add_argument('--r', type=float, default=0.05)
     # parser.add_argument('--seed', default=0)
 
-    parser.add_argument('--epsilon', type=float, default=1e-2, help='epsilon for IBP')
-    parser.add_argument('--bias_epsilon', type=float, default=1e-3, help='bias epsilon for IBP')
+    # parser.add_argument('--epsilon', type=float, default=1e-2, help='epsilon for IBP')
+    # parser.add_argument('--bias_epsilon', type=float, default=1e-3, help='bias epsilon for IBP')
 
     args = parser.parse_args()
-
+    args.cfx = "counternet"
+    if args.cfx_technique != "none":
+        args.cfx += args.cfx_technique
     if args.dataset == 'german':
         args.config = 'assets/german_credit.json'
-    elif args.dataset == 'heloc':
-        args.config = 'assets/heloc.json'
-    elif args.dataset == 'ctg':
-        args.config = 'assets/ctg.json'
+    else:
+        args.config = 'assets/' + args.dataset + '.json'
+
     with open(args.config, 'r') as f:
         args.config = json.load(f)
 

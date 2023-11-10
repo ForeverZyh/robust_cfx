@@ -394,7 +394,7 @@ def prepare_data_and_model(args):
     ret["train_data"] = train_data
     ret["test_data"] = test_data
     args.batch_size = args.config["batch_size"]
-    dim_in = train_data.num_features
+    dim_in = train_data.num_features_processed
     if args.config["act"] == 0:
         act = nn.ReLU
     elif args.config["act"] > 0:

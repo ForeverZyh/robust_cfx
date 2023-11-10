@@ -461,7 +461,7 @@ def load_data(data, label, feature_types, preprocessor=None):
     else:
         need_make_cont_features = False
     data.X, data.feat_var_map = preprocessor.encode_df(data.X)
-    data.num_features = data.X.shape[1]
+    data.num_features_processed = data.X.shape[1]
     if type(data.X) != type(torch.Tensor()):
         data.X = np.array(data.X)
     if need_make_cont_features:

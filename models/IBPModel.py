@@ -183,19 +183,16 @@ class VerifyModel(nn.Module):
             x is data
             y is ground-truth label
         '''
-        # convert x to float32
         assert loss_type in ["ours", "ibp", "crownibp", "none"]
         x = x.float()
         pred = self.forward_point_weights_bias(x)
         y_hat = torch.sigmoid(pred[:, 1] - pred[:, 0]).detach()
         y_hat_hard = pred.argmax(dim=1).detach()
-        # print(ori_output)
         if lambda_ratio == 0 or loss_type == "none":
             return 0
         max_loss = get_max_loss_by_type(self.loss_func_str)
         if cfx_x is None:
             return lambda_ratio * max_loss
-        # print(ori_loss)
 
         if loss_type == "ours":
             _, cfx_output = self.get_diffs_binary(x, cfx_x, y_hat_hard)
@@ -209,12 +206,9 @@ class VerifyModel(nn.Module):
             is_real_cfx = is_real_cfx & torch.where(y == 0, y_hat <= 0.5, y_hat > 0.5)
         if valid_cfx_only:
             is_real_cfx = is_real_cfx & is_cfx
-        # print(is_real_cfx, cfx_output)
         cfx_output = torch.sigmoid(cfx_output)
         cfx_loss = self.loss_func(cfx_output, 1.0 - y_hat)
-        # print(cfx_loss)
         cfx_loss = torch.where(is_real_cfx, cfx_loss, max_loss)
-        # print(cfx_loss)
         return (lambda_ratio * cfx_loss).mean()
 
     def save(self, filename):

@@ -16,6 +16,7 @@ from train import prepare_data_and_model
 
 '''
 Evaluate the robustness of counterfactual explanations
+After running on all models, run scripts/convert_logs.py to get a csv file with aggregated results.
 '''
 
 warnings.filterwarnings("ignore", category=ResourceWarning)
@@ -128,9 +129,19 @@ if __name__ == "__main__":
     parser.add_argument('--generate_only', action='store_true',
                         help='if true, only generate and save cfx, do not eval robustness')
     parser.add_argument('--skip_milp', action='store_true', help='if true, skip MILP verification')
+    parser.add_argument("--eps", type=float, default=None, help="override epsilon in config file")
+    parser.add_argument("--eps_ratio", type=float, default=None, help="override epsilon ratio in config file")
+
     args = parser.parse_args()
     with open(args.config, 'r') as f:
         args.config = json.load(f)
+
+    if args.eps is not None:
+        args.config["epsilon"] = args.eps
+    if args.eps_ratio is not None:
+        args.config["epsilon_ratio"] = args.eps_ratio
+
+    
     if not os.path.exists(args.cfx_save_dir):
         os.makedirs(args.cfx_save_dir)
     if not os.path.exists(args.log_save_dir):
