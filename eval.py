@@ -87,6 +87,10 @@ def main(args):
     else:
         with open(args.cfx_filename, 'rb') as f:
             cfx_x, is_cfx = pickle.load(f)
+
+    if type(cfx_x) == type([]):
+        cfx_x = torch.tensor(np.array(cfx_x))
+        is_cfx = torch.tensor(np.array(is_cfx))
     if not args.generate_only:
         orig_output = model.forward_point_weights_bias(torch.tensor(test_data.X).float()).argmax(dim=1)
         cfx_output = model.forward_point_weights_bias(cfx_x).argmax(dim=1)

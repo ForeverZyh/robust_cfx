@@ -42,6 +42,8 @@ def get_cfx(file, dataset):
         return 'wachter'
     elif 'proto' in file:
         return 'proto'
+    elif 'roar' in file:
+        return 'roar'
     elif 'counternetours' in file:
         return 'counternetours'
     elif 'counternetibp' in file:
@@ -104,6 +106,7 @@ def main(args):
 
         training_method = get_training_method(file)
         cfx = get_cfx(file, dataset)
+        print("CFX: ", cfx)
         epoch, eps, r = get_epoch_eps_r(file, dataset) # ran multiple epochs for student & taiwan
 
         # epsilon = float(lines[0].split(" ")[-1].split("\n")[0])
@@ -134,6 +137,7 @@ def main(args):
                 data_manifold_dist = float(lines[8].split(" ")[-3].split(",")[0])
                 data_manifold_dist_std = float(lines[8].split(" ")[-1].split("\n")[0])
         except:
+            print("problem wiht file",file)
             continue
 
         if args.verbose:
@@ -163,7 +167,7 @@ def main(args):
                 'proximity', 'proximity_std', 'sparsity', 'sparsity_std', 'data_manifold_dist', 
                 'data_manifold_dist_std', 'epoch', 'eps', 'ratio']
     df = pd.DataFrame(all_data, columns=columns)
-    df.to_csv("all_data_robust.csv", index=False)
+    df.to_csv(args.filename + ".csv", index=False)
 
 
 if __name__ == "__main__":
@@ -172,6 +176,7 @@ if __name__ == "__main__":
     parser.add_argument('--verbose', action='store_true', help='print out all data')
     parser.add_argument('--skip_milp', action='store_true', help='skip MILP')
     parser.add_argument('--target_datasets', default = [], nargs='+', help='datasets to run on')
+    parser.add_argument('--filename', type=str, default="all_data_robust", help="where to save results")
 
     args = parser.parse_args()
     main(args)
