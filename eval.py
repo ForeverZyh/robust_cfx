@@ -157,5 +157,6 @@ if __name__ == "__main__":
         args.cfx_filename = args.log_name[:-4]
     args.log_filename = os.path.join(args.log_save_dir, args.log_name)
     args.cfx_filename = os.path.join(args.cfx_save_dir, args.cfx_filename)
+    args.remove = [] # necessary for prepare_data_and_model
 
     main(args)
