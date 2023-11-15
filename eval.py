@@ -88,9 +88,10 @@ def main(args):
         print("loading from existing cfx file.")
         with open(args.cfx_filename, 'rb') as f:
             cfx_x, is_cfx = pickle.load(f)
-            if not isinstance(cfx_x, torch.Tensor):
-                cfx_x = torch.tensor(np.array(cfx_x))
-                is_cfx = torch.tensor(np.array(is_cfx))
+    if not isinstance(cfx_x, torch.Tensor):
+        cfx_x = torch.tensor(np.array(cfx_x))
+        is_cfx = torch.tensor(np.array(is_cfx))
+
     if not args.generate_only:
         orig_output = model.forward_point_weights_bias(torch.tensor(test_data.X).float()).argmax(dim=1)
         cfx_output = model.forward_point_weights_bias(cfx_x).argmax(dim=1)
@@ -145,7 +146,6 @@ if __name__ == "__main__":
     if args.eps_ratio is not None:
         args.config["epsilon_ratio"] = args.eps_ratio
 
-    
     if not os.path.exists(args.cfx_save_dir):
         os.makedirs(args.cfx_save_dir)
     if not os.path.exists(args.log_save_dir):
