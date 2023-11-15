@@ -64,7 +64,8 @@ def eval(args, models, all_preds, cfxs, is_cfxs):
     df = pd.DataFrame(all_data, columns=['validity_all', 'validity_for_cfx'])
     if not os.path.exists(os.path.join("logs", "validity")):
         os.makedirs(os.path.join("logs", "validity"))
-    df.to_csv(os.path.join("logs", "validity", args.model_type + args.dataset + args.cfx + args.technique + ".csv"), index=False)
+    df.to_csv(os.path.join("logs", "validity", args.model_type + args.dataset + args.cfx + args.technique + ".csv"),
+              index=False)
 
 
 def main(args):
@@ -77,7 +78,7 @@ def main(args):
         ret = prepare_data_and_model(args)
         train_data, test_data, model, minmax, preprocessor = ret["train_data"], ret["test_data"], ret["model"], ret[
             "minmax"], ret["preprocessor"]
-        
+
         if args.num_to_run is not None:
             test_data.X = test_data.X[:args.num_to_run]
             test_data.y = test_data.y[:args.num_to_run]
@@ -92,7 +93,8 @@ def main(args):
         # load cfx
         cfx_filename = os.path.join(args.cfx_dir, args.model_type + args.dataset + args.cfx + args.technique + str(i))
         if not os.path.exists(cfx_filename) or args.force_regen_cfx:
-            util_exp = UtilExp(model, preprocessor, train_data.X, test_data.X, test_data.y, train_data)
+            util_exp = UtilExp(model, preprocessor, train_data.X, test_data.X, test_data.y, train_data,
+                               target_p=args.target_p)
 
             util_exp.inn_delta_non_0 = Inn.from_IBPModel(model.encoder_net_ori)
             util_exp.inn_delta_non_0.act = args.config["act"]
@@ -110,15 +112,16 @@ def main(args):
 
     if not args.generate_only:
         eval(args, models, all_preds, cfxs, is_cfxs)
-    
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("dataset")
-    parser.add_argument("model_type", help="Standard or IBP", choices=["Standard", "IBP"]) 
-    parser.add_argument("technique", type=str, choices=["inn","roar"], help="which CFX generation technique to use (ROAR or INN)")
-    parser.add_argument('--cfx', type=str, default="counternet", help="only counternet model is trained for now",
-                        choices=["counternet"])
+    parser.add_argument("model_type", help="Standard or IBP", choices=["Standard", "IBP"])
+    parser.add_argument("technique", type=str, choices=["inn", "roar"],
+                        help="which CFX generation technique to use (ROAR or INN)")
+    parser.add_argument('--target_p', type=float, default=0, help="target proximity for ROAR")
+    parser.add_argument('--cfx', type=str, default="counternet", help="only counternet model is trained for now")
     parser.add_argument("--cfx_dir", default="saved_cfxs", help="directory where cfxs are saved")
     parser.add_argument("--model_dir", default='trained_models',
                         help="directory where models are saved, if omitted will be trained_models/dataset")
@@ -128,9 +131,10 @@ if __name__ == "__main__":
     parser.add_argument('--force_regen_cfx', action='store_true',
                         help='whether to force regenerate cfx if the file exists')
     parser.add_argument('--generate_only', action='store_true', help='whether to only generate cfx')
-    parser.add_argument('--target_idxs', default=[0,1,2,3,4,5,6,7,8,9], nargs='+', type=int, help='which random seeds to run on')
+    parser.add_argument('--target_idxs', default=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9], nargs='+', type=int,
+                        help='which random seeds to run on')
     parser.add_argument('--num_to_run', type=int, default=None)
-    parser.add_argument('--verbose',action='store_true')
+    parser.add_argument('--verbose', action='store_true')
     args = parser.parse_args()
     args.model_cnt = len(args.target_idxs)
 
