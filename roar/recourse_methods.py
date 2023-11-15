@@ -59,7 +59,7 @@ def counterfactual_recourse(torch_model, x, feature_costs=None, y_target=1.0, n_
 class RobustRecourse():
     def __init__(self, W=None, W0=None, y_target=1,
                  delta_max=0.1, feature_costs=None,
-                 pW=None, pW0=None):
+                 pW=None, pW0=None, target_p=0):
         self.set_W(W)
         self.set_W0(W0)
 
@@ -69,6 +69,7 @@ class RobustRecourse():
         self.y_target = torch.tensor(y_target).float()
         self.delta_max = delta_max
         self.feature_costs = feature_costs
+        self.target_p = target_p
         if self.feature_costs is not None:
             self.feature_costs = torch.from_numpy(feature_costs).float()
 
@@ -94,7 +95,7 @@ class RobustRecourse():
 
     def l1_cost(self, x_new, x):
         cost = torch.dist(x_new, x, 1)
-        return cost
+        return torch.clamp(cost, min=self.target_p * len(x))
 
     def pfc_cost(self, x_new, x):
         cost = torch.norm(self.feature_costs * (x_new - x), 1)

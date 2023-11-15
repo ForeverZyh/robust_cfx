@@ -293,7 +293,7 @@ class HiddenPrints:
 
 
 class UtilExp:
-    def __init__(self, clf, preprocessor, train_X, test_instances, test_labels, dataset = None):
+    def __init__(self, clf, preprocessor, train_X, test_instances, test_labels, dataset = None, target_p=0):
         self.clf = clf
         self.preprocessor = preprocessor
         # self.num_layers = get_clf_num_layers(clf)
@@ -320,6 +320,7 @@ class UtilExp:
         self.test_labels = test_labels
         self.inn_delta_non_0 = None
         self.inn_delta_0 = None
+        self.target_p = target_p
 
         # # load util
         # self.build_dataset_obj()
@@ -592,7 +593,7 @@ class UtilExp:
     def run_roar_one(self, x, cat_feats, labels, lamb1=1, lamb22=None, eps=1):
 
         coefficients = intercept = None
-        robust_recourse = RobustRecourse(W=coefficients, W0=intercept, feature_costs=None, y_target=eps)
+        robust_recourse = RobustRecourse(W=coefficients, W0=intercept, feature_costs=None, y_target=eps, target_p=self.target_p)
         with HiddenPrints():
             if lamb22 is None:
                 lamb2 = robust_recourse.choose_lambda(x.reshape(1, -1), self.clf.predict, self.train_X,
