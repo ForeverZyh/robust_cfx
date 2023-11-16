@@ -103,7 +103,7 @@ def main(args):
     df = pd.DataFrame(all_data, columns=['validity_all', 'validity_for_cfx'])
     if not os.path.exists(os.path.join("logs", "validity")):
         os.makedirs(os.path.join("logs", "validity"))
-    df.to_csv(os.path.join("logs", "validity", args.model_type + args.dataset + chtcnum + "e" + str(args.epoch) \
+    df.to_csv(os.path.join(args.log_save_dir, args.model_type + args.dataset + chtcnum + "e" + str(args.epoch) \
                             + "eps" + str(args.eps) + "r" + str(args.r) + ".csv"), index=False)
 
 
@@ -118,6 +118,7 @@ if __name__ == "__main__":
                         help="directory where models are saved, if omitted will be trained_models")
     parser.add_argument('--onehot', action='store_true', help='whether to use one-hot encoding')
     parser.add_argument('--model_cnt', type=int, default=10, help='how many models trained for each dataset')
+    parser.add_argument('--log_save_dir', default='logs/validity')
     parser.add_argument('--verbose', action='store_true')
     parser.add_argument("--epoch", type=int, default=100)
     parser.add_argument('--eps', type=float, default=0.2)

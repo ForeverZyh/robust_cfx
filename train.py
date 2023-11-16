@@ -353,8 +353,7 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
     print("best epoch: ", best_epoch)
     return model
 
-
-def prepare_data_and_model(args):
+def prepare_data(args):
     ret = {"preprocessor": None, "train_data": None, "test_data": None, "model": None, "minmax": None}
     if args.config["dataset_name"] == "german_credit":
         if args.cfx == 'proto':
@@ -401,6 +400,13 @@ def prepare_data_and_model(args):
         
     ret["train_data"] = train_data
     ret["test_data"] = test_data
+    return ret
+
+def prepare_data_and_model(args):
+
+    ret = prepare_data(args)
+    train_data, preprocessor = ret["train_data"], ret["preprocessor"]
+    
     args.batch_size = args.config["batch_size"]
     dim_in = train_data.num_features_processed
     if args.config["act"] == 0:

@@ -67,8 +67,8 @@ class CounterNet:
         self.model = tf.keras.Model(inputs=in_x, outputs=x)
 
     def save(self, filename):
-        self.model.save_weights(filename + "_encoder_net_ori.h5")
+        self.model.save_weights(filename + ".h5")
 
     def load(self, filename):
-        self.model.load_weights(filename + "_encoder_net_ori.h5")
+        self.model.load_weights(filename + ".h5")
         self.encoder_verify = None  # odel(self.encoder_net_ori, self.dummy_input_shape, loss_func=self.loss_1)
