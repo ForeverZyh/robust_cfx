@@ -45,7 +45,7 @@ def get_cfx(file, dataset):
     elif 'counternetoursroar' in file:
         return 'counternetoursroar'
     elif 'counternetroar' in file:
-        return 'counternetinn'
+        return 'counternetroar'
     elif 'roar' in file:
         return 'roar'
     elif 'counternetours' in file:
