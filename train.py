@@ -393,10 +393,11 @@ def prepare_data_and_model(args):
         raise NotImplementedError(f"Dataset {args.config['dataset_name']} not implemented")
     
     # reverse sort args.remove
-
-    for i in sorted(args.remove,reverse=True):
-        train_data.X = np.concatenate((train_data.X[:i], train_data.X[i+1:]), axis=0)
-        train_data.y = np.concatenate((train_data.y[:i], train_data.y[i+1:]), axis=0)
+    if args.remove_pct is not None:
+        start_idx = args.remove_pct * 0.01 * len(train_data) * args.removal_start
+        end_idx = args.remove_pct * 0.01 * len(train_data) * (args.removal_start + 1)
+        train_data.X = np.concatenate((train_data.X[:int(start_idx)], train_data.X[int(end_idx):]), axis=0)
+        train_data.y = np.concatenate((train_data.y[:int(start_idx)], train_data.y[int(end_idx):]), axis=0)
         
     ret["train_data"] = train_data
     ret["test_data"] = test_data
@@ -447,7 +448,8 @@ if __name__ == '__main__':
     parser.add_argument('--wachter_max_iter', type=int, default=100, help='max iter for wachter')
     parser.add_argument('--wachter_lam_init', type=float, default=1e-3, help='initial lambda for wachter')
     parser.add_argument('--wachter_max_lam_steps', type=int, default=10, help='max lambda steps for wachter')
-    parser.add_argument('--remove', default=[], nargs='+', type=int, help='indices of data points to remove for LOO')
+    parser.add_argument('--remove_pct', default=None, type=float, help='percentage of data points to remove for LOO')
+    parser.add_argument('--removal_start', type=float, default=0, help='Where to start removal, i.e., if 0 start at x[0]. If 1, start at x[remove_pct*n], etc.')
 
     # training args
     parser.add_argument('--epoch', type=int, default=50, help='number of epochs to train')

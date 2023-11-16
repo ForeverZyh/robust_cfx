@@ -33,10 +33,13 @@ def main(args):
     is_cfxs = []
     all_preds = []
     for i in range(args.model_cnt):
-        try:
-            chtcnum = get_chtc_num(args.model_type, args.dataset, args.epoch, args.cfx_technique, args.eps, args.r)
-        except:
-            chtcnum = ""
+        if args.chtc_num is None:
+            try:
+                chtcnum = get_chtc_num(args.model_type, args.dataset, args.epoch, args.cfx_technique, args.eps, args.r)
+            except:
+                chtcnum = ""
+        else:
+            chtcnum = args.chtc_num
         args.model = args.model_type + args.dataset + chtcnum + "_" + str(i)
         ret = prepare_data_and_model(args)
         train_data, test_data, model, minmax = ret["train_data"], ret["test_data"], ret["model"], ret["minmax"]
@@ -60,7 +63,6 @@ def main(args):
             cfx_x, is_cfx = pickle.load(f)
             cfxs.append(torch.tensor(cfx_x))
             is_cfxs.append(torch.tensor(is_cfx))
-        print(torch.tensor(cfx_x).shape)
 
     all_data = []
     l2_norms = []
@@ -85,8 +87,6 @@ def main(args):
                 these_cfx = cfxs[j]
                 these_is_cfx = is_cfxs[j]
 
-
-                print(cfxs[j].shape)
                 cfx_preds = this_model.forward_point_weights_bias(these_cfx.float()).argmax(dim=1)
 
                 is_valid = torch.where(these_is_cfx, these_preds != cfx_preds, torch.tensor([False]))
@@ -112,6 +112,7 @@ if __name__ == "__main__":
     parser.add_argument("dataset")
     parser.add_argument("model_type", help="Standard or IBP", choices=["Standard", "IBP"])
     parser.add_argument("cfx_technique", help="ours, ibp, crownibp, or none")
+    parser.add_argument("--chtc_num", help="override chtc num lookup", default=None)
     parser.add_argument("--cfx_dir", default="saved_cfxs", help="directory where cfxs are saved")
     parser.add_argument("--model_dir", default='trained_models',
                         help="directory where models are saved, if omitted will be trained_models")
@@ -138,6 +139,6 @@ if __name__ == "__main__":
     with open(args.config, 'r') as f:
         args.config = json.load(f)
 
-    args.remove = []
+    args.remove_pct = None
 
     main(args)

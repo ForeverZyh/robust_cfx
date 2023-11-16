@@ -151,5 +151,5 @@ if __name__ == "__main__":
     with open(args.config, 'r') as f:
         args.config = json.load(f)
 
-    args.remove = []
+    args.remove_pct = None
     main(args)
