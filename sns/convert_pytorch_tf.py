@@ -2,18 +2,12 @@ import argparse
 import json
 import os
 
-import torch.nn as nn
-# import onnx
-# import tf2onnx
 import tensorflow as tf
-from torch.autograd import Variable
-import torch
 
 from train import prepare_data_and_model
-import models.IBPModel as IBPModel
 import models.IBPModel_tf as IBPModel_tf
 
-from utils.utilities import seed_everything, FNNDims
+from utils.utilities import FNNDims
 
 
 def main(args):
@@ -25,18 +19,16 @@ def main(args):
     if args.config["act"] == 0:
         act = tf.keras.activations.relu
     elif args.config["act"] > 0:
-        act = tf.keras.layers.LeakyReLU(args.config["act"])
+        act = lambda: tf.keras.layers.LeakyReLU(args.config["act"])
     dim_in = train_data.num_features_processed
     enc_dims = FNNDims(dim_in, args.config["encoder_dims"])
     pred_dims = FNNDims(None, args.config["decoder_dims"])
     exp_dims = FNNDims(None, args.config["explainer_dims"])
-
     # create keras model
     model = IBPModel_tf.CounterNet(enc_dims, pred_dims, exp_dims, 2,
                                    epsilon_ratio=args.config["eps_ratio"],
                                    activation=act, dropout=args.config["dropout"], preprocessor=minmax,
                                    config=args.config)
-
     model.build()
     # copy weights from model_pytorch to model
     # first, copy weights from model_pytorch.encoder_net_ori.encoder. This is a MultiLayerPerceptron
@@ -52,8 +44,10 @@ def main(args):
         [model_pytorch.encoder_net_ori.final_fc.linear.weight.transpose(0, 1).detach().numpy(),
          model_pytorch.encoder_net_ori.final_fc.linear.bias.detach().numpy()])
 
+    print(model.model.predict(train_data.X[:10]))
     model.save(os.path.join(args.save_dir, args.model))
     model.load(os.path.join(args.save_dir, args.model))
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

@@ -72,114 +72,113 @@ CREDIT_FEAT_PROTO = {
 }
 
 HELOC_FEAT = {
-    0: DataType.CONTINUOUS_REAL, # ExternalRiskEstimate
-    1: DataType.CONTINUOUS_REAL, # MSinceOldestTradeOpen
-    2: DataType.CONTINUOUS_REAL, # MSinceMostRecentTradeOpen
-    3: DataType.CONTINUOUS_REAL, # AverageMInFile
-    4: DataType.CONTINUOUS_REAL, # NumSatisfactoryTrades
-    5: DataType.CONTINUOUS_REAL, # NumTrades60Ever2DerogPubRec
-    6: DataType.CONTINUOUS_REAL, # NumTrades90Ever2DerogPubRec
-    7: DataType.CONTINUOUS_REAL, # PercentTradesNeverDelq
-    8: DataType.CONTINUOUS_REAL, # MSinceMostRecentDelq
-    9: DataType.CONTINUOUS_REAL, # MaxDelq2PublicRecLast12M
-    10: DataType.CONTINUOUS_REAL, # MaxDelqEver
-    11: DataType.CONTINUOUS_REAL, # NumTotalTrades
-    12: DataType.CONTINUOUS_REAL, # NumTradesOpeninLast12M
-    13: DataType.CONTINUOUS_REAL, # PercentInstallTrades
-    14: DataType.CONTINUOUS_REAL, # MSinceMostRecentInqexcl7days
-    15: DataType.CONTINUOUS_REAL, # NumInqLast6M
-    16: DataType.CONTINUOUS_REAL, # NumInqLast6Mexcl7days
-    17: DataType.CONTINUOUS_REAL, # NetFractionRevolvingBurden
-    18: DataType.CONTINUOUS_REAL, # NetFractionInstallBurden
-    19: DataType.CONTINUOUS_REAL, # NumRevolvingTradesWBalance
-    20: DataType.CONTINUOUS_REAL, # NumInstallTradesWBalance
-    21: DataType.CONTINUOUS_REAL, # NumBank2NatlTradesWHighUtilization
-    22: DataType.CONTINUOUS_REAL, # PercentTradesWBalance
+    0: DataType.CONTINUOUS_REAL,  # ExternalRiskEstimate
+    1: DataType.CONTINUOUS_REAL,  # MSinceOldestTradeOpen
+    2: DataType.CONTINUOUS_REAL,  # MSinceMostRecentTradeOpen
+    3: DataType.CONTINUOUS_REAL,  # AverageMInFile
+    4: DataType.CONTINUOUS_REAL,  # NumSatisfactoryTrades
+    5: DataType.CONTINUOUS_REAL,  # NumTrades60Ever2DerogPubRec
+    6: DataType.CONTINUOUS_REAL,  # NumTrades90Ever2DerogPubRec
+    7: DataType.CONTINUOUS_REAL,  # PercentTradesNeverDelq
+    8: DataType.CONTINUOUS_REAL,  # MSinceMostRecentDelq
+    9: DataType.CONTINUOUS_REAL,  # MaxDelq2PublicRecLast12M
+    10: DataType.CONTINUOUS_REAL,  # MaxDelqEver
+    11: DataType.CONTINUOUS_REAL,  # NumTotalTrades
+    12: DataType.CONTINUOUS_REAL,  # NumTradesOpeninLast12M
+    13: DataType.CONTINUOUS_REAL,  # PercentInstallTrades
+    14: DataType.CONTINUOUS_REAL,  # MSinceMostRecentInqexcl7days
+    15: DataType.CONTINUOUS_REAL,  # NumInqLast6M
+    16: DataType.CONTINUOUS_REAL,  # NumInqLast6Mexcl7days
+    17: DataType.CONTINUOUS_REAL,  # NetFractionRevolvingBurden
+    18: DataType.CONTINUOUS_REAL,  # NetFractionInstallBurden
+    19: DataType.CONTINUOUS_REAL,  # NumRevolvingTradesWBalance
+    20: DataType.CONTINUOUS_REAL,  # NumInstallTradesWBalance
+    21: DataType.CONTINUOUS_REAL,  # NumBank2NatlTradesWHighUtilization
+    22: DataType.CONTINUOUS_REAL,  # PercentTradesWBalance
 }
 
-
 CTG_FEAT = {
-    0: DataType.CONTINUOUS_REAL, # LB
-    1: DataType.CONTINUOUS_REAL, # AC
-    2: DataType.CONTINUOUS_REAL, # FM
-    3: DataType.CONTINUOUS_REAL, # UC
-    4: DataType.CONTINUOUS_REAL, # DL
-    5: DataType.CONTINUOUS_REAL, # DS
-    6: DataType.CONTINUOUS_REAL, # DP
-    7: DataType.CONTINUOUS_REAL, # ASTV
-    8: DataType.CONTINUOUS_REAL, # MSTV
-    9: DataType.CONTINUOUS_REAL, # ALTV
-    10: DataType.CONTINUOUS_REAL, # MLTV
-    11: DataType.CONTINUOUS_REAL, # Width
-    12: DataType.CONTINUOUS_REAL, # Min
-    13: DataType.CONTINUOUS_REAL, # Max
-    14: DataType.CONTINUOUS_REAL, # Nmax
-    15: DataType.CONTINUOUS_REAL, # Nzeros
-    16: DataType.CONTINUOUS_REAL, # Mode
-    17: DataType.CONTINUOUS_REAL, # Mean
-    18: DataType.CONTINUOUS_REAL, # Median
-    19: DataType.CONTINUOUS_REAL, # Variance
-    20: DataType.CONTINUOUS_REAL, # Tendency
+    0: DataType.CONTINUOUS_REAL,  # LB
+    1: DataType.CONTINUOUS_REAL,  # AC
+    2: DataType.CONTINUOUS_REAL,  # FM
+    3: DataType.CONTINUOUS_REAL,  # UC
+    4: DataType.CONTINUOUS_REAL,  # DL
+    5: DataType.CONTINUOUS_REAL,  # DS
+    6: DataType.CONTINUOUS_REAL,  # DP
+    7: DataType.CONTINUOUS_REAL,  # ASTV
+    8: DataType.CONTINUOUS_REAL,  # MSTV
+    9: DataType.CONTINUOUS_REAL,  # ALTV
+    10: DataType.CONTINUOUS_REAL,  # MLTV
+    11: DataType.CONTINUOUS_REAL,  # Width
+    12: DataType.CONTINUOUS_REAL,  # Min
+    13: DataType.CONTINUOUS_REAL,  # Max
+    14: DataType.CONTINUOUS_REAL,  # Nmax
+    15: DataType.CONTINUOUS_REAL,  # Nzeros
+    16: DataType.CONTINUOUS_REAL,  # Mode
+    17: DataType.CONTINUOUS_REAL,  # Mean
+    18: DataType.CONTINUOUS_REAL,  # Median
+    19: DataType.CONTINUOUS_REAL,  # Variance
+    20: DataType.CONTINUOUS_REAL,  # Tendency
 }
 
 STUDENT_FEAT = {
-    0: DataType.CONTINUOUS_REAL, # num_prev_attempts
-    1: DataType.CONTINUOUS_REAL, # weight
-    2: DataType.CONTINUOUS_REAL, # weighted_score
-    3: DataType.CONTINUOUS_REAL, # forumng_click
-    4: DataType.CONTINUOUS_REAL, # homepage_click
-    5: DataType.CONTINUOUS_REAL, # oucontent_click
-    6: DataType.CONTINUOUS_REAL, # resource_click
-    7: DataType.CONTINUOUS_REAL, # subpage_click
-    8: DataType.CONTINUOUS_REAL, # url click
-    9: DataType.CONTINUOUS_REAL, # dataplus_click
-    10: DataType.CONTINUOUS_REAL, # glossary_click
-    11: DataType.CONTINUOUS_REAL, # ou_collaborate_click
-    12: DataType.CONTINUOUS_REAL, # quiz_click
-    13: DataType.CONTINUOUS_REAL, # ouelluminate_click
-    14: DataType.CONTINUOUS_REAL, # sharedsubpage_click
-    15: DataType.CONTINUOUS_REAL, # questionnaire_click
-    16: DataType.CONTINUOUS_REAL, # page_click
-    17: DataType.CONTINUOUS_REAL, # externalquiz_click
-    18: DataType.CONTINUOUS_REAL, # ouwiki_click
-    19: DataType.CONTINUOUS_REAL, # dualpane_click
-    20: DataType.CONTINUOUS_REAL, # folder_click
-    21: DataType.CONTINUOUS_REAL, # repeatactivity_click
-    22: DataType.CONTINUOUS_REAL, # htmlactivity_click
-    23: DataType.DISCRETE, # code_module
-    24: DataType.DISCRETE, # gender
-    25: DataType.DISCRETE, # region
-    26: DataType.DISCRETE, # highest_education
-    27: DataType.DISCRETE, # imd_band
-    28: DataType.DISCRETE, # age_band
-    29: DataType.DISCRETE, # studied_credits
-    30: DataType.DISCRETE, # disability
+    0: DataType.CONTINUOUS_REAL,  # num_prev_attempts
+    1: DataType.CONTINUOUS_REAL,  # weight
+    2: DataType.CONTINUOUS_REAL,  # weighted_score
+    3: DataType.CONTINUOUS_REAL,  # forumng_click
+    4: DataType.CONTINUOUS_REAL,  # homepage_click
+    5: DataType.CONTINUOUS_REAL,  # oucontent_click
+    6: DataType.CONTINUOUS_REAL,  # resource_click
+    7: DataType.CONTINUOUS_REAL,  # subpage_click
+    8: DataType.CONTINUOUS_REAL,  # url click
+    9: DataType.CONTINUOUS_REAL,  # dataplus_click
+    10: DataType.CONTINUOUS_REAL,  # glossary_click
+    11: DataType.CONTINUOUS_REAL,  # ou_collaborate_click
+    12: DataType.CONTINUOUS_REAL,  # quiz_click
+    13: DataType.CONTINUOUS_REAL,  # ouelluminate_click
+    14: DataType.CONTINUOUS_REAL,  # sharedsubpage_click
+    15: DataType.CONTINUOUS_REAL,  # questionnaire_click
+    16: DataType.CONTINUOUS_REAL,  # page_click
+    17: DataType.CONTINUOUS_REAL,  # externalquiz_click
+    18: DataType.CONTINUOUS_REAL,  # ouwiki_click
+    19: DataType.CONTINUOUS_REAL,  # dualpane_click
+    20: DataType.CONTINUOUS_REAL,  # folder_click
+    21: DataType.CONTINUOUS_REAL,  # repeatactivity_click
+    22: DataType.CONTINUOUS_REAL,  # htmlactivity_click
+    23: DataType.DISCRETE,  # code_module
+    24: DataType.DISCRETE,  # gender
+    25: DataType.DISCRETE,  # region
+    26: DataType.DISCRETE,  # highest_education
+    27: DataType.DISCRETE,  # imd_band
+    28: DataType.DISCRETE,  # age_band
+    29: DataType.DISCRETE,  # studied_credits
+    30: DataType.DISCRETE,  # disability
 }
 
 TAIWAN_FEAT = {
-    0: DataType.CONTINUOUS_REAL, # limit bal
-    1: DataType.CONTINUOUS_REAL, # age
-    2: DataType.CONTINUOUS_REAL, # pay 0
-    3: DataType.CONTINUOUS_REAL, # pay 2
-    4: DataType.CONTINUOUS_REAL, # pay 3
-    5: DataType.CONTINUOUS_REAL, # pay 4
-    6: DataType.CONTINUOUS_REAL, # pay 5
-    7: DataType.CONTINUOUS_REAL, # pay 6
-    8: DataType.CONTINUOUS_REAL, # bill 1
-    9: DataType.CONTINUOUS_REAL, # bill 2
-    10: DataType.CONTINUOUS_REAL, # bill 3
-    11: DataType.CONTINUOUS_REAL, # bill 4
-    12: DataType.CONTINUOUS_REAL, # bill 5
-    13: DataType.CONTINUOUS_REAL, # bill 6
-    14: DataType.CONTINUOUS_REAL, # pay 1
-    15: DataType.CONTINUOUS_REAL, # pay 2
-    16: DataType.CONTINUOUS_REAL, # pay 3
-    17: DataType.CONTINUOUS_REAL, # pay 4
-    18: DataType.CONTINUOUS_REAL, # pay 5
-    19: DataType.CONTINUOUS_REAL, # pay 6
-    20: DataType.DISCRETE, # sex
-    21: DataType.DISCRETE, # education
-    22: DataType.DISCRETE, # marriage
+    0: DataType.CONTINUOUS_REAL,  # limit bal
+    1: DataType.CONTINUOUS_REAL,  # age
+    2: DataType.CONTINUOUS_REAL,  # pay 0
+    3: DataType.CONTINUOUS_REAL,  # pay 2
+    4: DataType.CONTINUOUS_REAL,  # pay 3
+    5: DataType.CONTINUOUS_REAL,  # pay 4
+    6: DataType.CONTINUOUS_REAL,  # pay 5
+    7: DataType.CONTINUOUS_REAL,  # pay 6
+    8: DataType.CONTINUOUS_REAL,  # bill 1
+    9: DataType.CONTINUOUS_REAL,  # bill 2
+    10: DataType.CONTINUOUS_REAL,  # bill 3
+    11: DataType.CONTINUOUS_REAL,  # bill 4
+    12: DataType.CONTINUOUS_REAL,  # bill 5
+    13: DataType.CONTINUOUS_REAL,  # bill 6
+    14: DataType.CONTINUOUS_REAL,  # pay 1
+    15: DataType.CONTINUOUS_REAL,  # pay 2
+    16: DataType.CONTINUOUS_REAL,  # pay 3
+    17: DataType.CONTINUOUS_REAL,  # pay 4
+    18: DataType.CONTINUOUS_REAL,  # pay 5
+    19: DataType.CONTINUOUS_REAL,  # pay 6
+    20: DataType.DISCRETE,  # sex
+    21: DataType.DISCRETE,  # education
+    22: DataType.DISCRETE,  # marriage
 }
 
 ORDINAL_FEATURES_CREDIT = {"installment_rate": 4, "present_residence": 4, "number_credits": 4}
@@ -480,3 +479,53 @@ def load_data_v1(data, data_test, label, feature_types):
     test_data.X = minmax.transform(test_data.X)
 
     return train_data, test_data, minmax
+
+
+def prepare_data(args):
+    ret = {"preprocessor": None, "train_data": None, "test_data": None, "model": None, "minmax": None}
+    if args.config["dataset_name"] == "german_credit":
+        if args.cfx == 'proto':
+            feature_types = CREDIT_FEAT_PROTO
+        else:
+            feature_types = CREDIT_FEAT
+        if args.onehot:
+            train_data, preprocessor = load_data("data/german_train.csv", "credit_risk", feature_types)
+            test_data, _, = load_data("data/german_test.csv", "credit_risk", feature_types, preprocessor)
+            ret["preprocessor"] = preprocessor
+        else:
+            train_data, test_data, minmax = load_data_v1("data/german_train.csv", "data/german_test.csv",
+                                                         "credit_risk", feature_types)
+            ret["minmax"] = minmax
+    elif args.config["dataset_name"] == "heloc":
+        feature_types = HELOC_FEAT
+        train_data, preprocessor = load_data("data/heloc_train.csv", "label", feature_types)
+        test_data, _, = load_data("data/heloc_test.csv", "label", feature_types, preprocessor)
+        ret["preprocessor"] = preprocessor
+    elif args.config["dataset_name"] == "ctg":
+        feature_types = CTG_FEAT
+        train_data, preprocessor = load_data("data/ctg_train.csv", "label", feature_types)
+        test_data, _, = load_data("data/ctg_test.csv", "label", feature_types, preprocessor)
+        ret['preprocessor'] = preprocessor
+    elif args.config["dataset_name"] == "student":
+        feature_types = STUDENT_FEAT
+        train_data, preprocessor = load_data("data/student_train.csv", "final_result", feature_types)
+        test_data, _, = load_data("data/student_test.csv", "final_result", feature_types, preprocessor)
+        ret['preprocessor'] = preprocessor
+    elif args.config["dataset_name"] == "taiwan":
+        feature_types = TAIWAN_FEAT
+        train_data, preprocessor = load_data("data/taiwan_train.csv", "Y", feature_types)
+        test_data, _, = load_data("data/taiwan_test.csv", "Y", feature_types, preprocessor)
+        ret['preprocessor'] = preprocessor
+    else:
+        raise NotImplementedError(f"Dataset {args.config['dataset_name']} not implemented")
+
+    # reverse sort args.remove
+    if args.remove_pct is not None:
+        start_idx = args.remove_pct * 0.01 * len(train_data) * args.removal_start
+        end_idx = args.remove_pct * 0.01 * len(train_data) * (args.removal_start + 1)
+        train_data.X = np.concatenate((train_data.X[:int(start_idx)], train_data.X[int(end_idx):]), axis=0)
+        train_data.y = np.concatenate((train_data.y[:int(start_idx)], train_data.y[int(end_idx):]), axis=0)
+
+    ret["train_data"] = train_data
+    ret["test_data"] = test_data
+    return ret

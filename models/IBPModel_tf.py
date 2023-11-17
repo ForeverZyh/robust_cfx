@@ -1,23 +1,21 @@
 import tensorflow as tf
-from tensorflow.keras import layers
 import numpy as np
 
 from auto_LiRPA import BoundedModule, BoundedParameter
 from utils.utilities import seed_everything, FAKE_INF, EPS, FNNDims, get_loss_by_type, get_max_loss_by_type
 
 
-class MultilayerPerception(layers.Layer):
+class MultilayerPerception:
     def __init__(self, dims, epsilon_ratio, activation, dropout=0):
         super(MultilayerPerception, self).__init__()
         self.blocks = []
         for i in range(1, len(dims)):
-            print("Adding layer", i, "with dims", dims[i - 1], dims[i])
-            self.blocks.append(layers.Dense(dims[i]))
-            self.blocks.append(activation)
+            self.blocks.append(tf.keras.layers.Dense(dims[i]))
+            self.blocks.append(activation())
 
-    def call(self, x):
-        for layer in self.blocks:
-            x = layer(x)
+    def build(self, x):
+        for b in self.blocks:
+            x = b(x)
         return x
 
 
@@ -31,7 +29,7 @@ class EncDec:
                                             dropout=dropout)
         self.decoder = MultilayerPerception([dec_dims.in_dim] + dec_dims.hidden_dims, epsilon_ratio, activation,
                                             dropout=dropout)
-        self.final_fc = layers.Dense(num_outputs, activation=tf.nn.softmax)
+        self.final_fc = tf.keras.layers.Dense(num_outputs, activation=tf.nn.softmax)
         self.epsilon_ratio = epsilon_ratio
 
 
@@ -61,14 +59,14 @@ class CounterNet:
 
     def build(self):
         in_x = tf.keras.Input(shape=(self.encoder_net_ori.enc_dims.in_dim,))
-        x = self.encoder_net_ori.encoder(in_x)
-        x = self.encoder_net_ori.decoder(x)
+        x = self.encoder_net_ori.encoder.build(in_x)
+        x = self.encoder_net_ori.decoder.build(x)
         x = self.encoder_net_ori.final_fc(x)
-        self.model = tf.keras.Model(inputs=in_x, outputs=x)
+        self.model = tf.keras.models.Model(inputs=in_x, outputs=x)
 
     def save(self, filename):
         self.model.save_weights(filename + ".h5")
 
     def load(self, filename):
         self.model.load_weights(filename + ".h5")
-        self.encoder_verify = None  # odel(self.encoder_net_ori, self.dummy_input_shape, loss_func=self.loss_1)
+        self.encoder_verify = None

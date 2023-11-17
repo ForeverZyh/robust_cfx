@@ -9,7 +9,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import wandb
 
-from utils import dataset
+from utils.dataset import prepare_data
 from utils import cfx
 from models.IBPModel import FNN, VerifyModel, CounterNet, BoundedLinear
 from utils.utilities import seed_everything, FNNDims
@@ -18,6 +18,7 @@ import warnings
 
 # silence ResourceWarning
 warnings.filterwarnings("ignore", category=ResourceWarning)
+
 
 def eval_chunk(model, test_dataloader, val_dataloader, train_dataloader, epoch, cfx_x, is_cfx):
     model.eval()
@@ -353,60 +354,11 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
     print("best epoch: ", best_epoch)
     return model
 
-def prepare_data(args):
-    ret = {"preprocessor": None, "train_data": None, "test_data": None, "model": None, "minmax": None}
-    if args.config["dataset_name"] == "german_credit":
-        if args.cfx == 'proto':
-            feature_types = dataset.CREDIT_FEAT_PROTO
-        else:
-            feature_types = dataset.CREDIT_FEAT
-        if args.onehot:
-            train_data, preprocessor = dataset.load_data("data/german_train.csv", "credit_risk", feature_types)
-            test_data, _, = dataset.load_data("data/german_test.csv", "credit_risk", feature_types, preprocessor)
-            ret["preprocessor"] = preprocessor
-        else:
-            train_data, test_data, minmax = dataset.load_data_v1("data/german_train.csv", "data/german_test.csv",
-                                                                 "credit_risk", feature_types)
-            ret["minmax"] = minmax
-    elif args.config["dataset_name"] == "heloc":
-        feature_types = dataset.HELOC_FEAT
-        train_data, preprocessor = dataset.load_data("data/heloc_train.csv", "label", feature_types)
-        test_data, _, = dataset.load_data("data/heloc_test.csv", "label", feature_types, preprocessor)
-        ret["preprocessor"] = preprocessor
-    elif args.config["dataset_name"] == "ctg":
-        feature_types = dataset.CTG_FEAT
-        train_data, preprocessor = dataset.load_data("data/ctg_train.csv", "label", feature_types)
-        test_data, _, = dataset.load_data("data/ctg_test.csv", "label", feature_types, preprocessor)
-        ret['preprocessor'] = preprocessor
-    elif args.config["dataset_name"] == "student":
-        feature_types = dataset.STUDENT_FEAT
-        train_data, preprocessor = dataset.load_data("data/student_train.csv", "final_result", feature_types)
-        test_data, _, = dataset.load_data("data/student_test.csv", "final_result", feature_types, preprocessor)
-        ret['preprocessor'] = preprocessor
-    elif args.config["dataset_name"] == "taiwan":
-        feature_types = dataset.TAIWAN_FEAT
-        train_data, preprocessor = dataset.load_data("data/taiwan_train.csv", "Y", feature_types)
-        test_data, _, = dataset.load_data("data/taiwan_test.csv", "Y", feature_types, preprocessor)
-        ret['preprocessor'] = preprocessor
-    else:
-        raise NotImplementedError(f"Dataset {args.config['dataset_name']} not implemented")
-    
-    # reverse sort args.remove
-    if args.remove_pct is not None:
-        start_idx = args.remove_pct * 0.01 * len(train_data) * args.removal_start
-        end_idx = args.remove_pct * 0.01 * len(train_data) * (args.removal_start + 1)
-        train_data.X = np.concatenate((train_data.X[:int(start_idx)], train_data.X[int(end_idx):]), axis=0)
-        train_data.y = np.concatenate((train_data.y[:int(start_idx)], train_data.y[int(end_idx):]), axis=0)
-        
-    ret["train_data"] = train_data
-    ret["test_data"] = test_data
-    return ret
 
 def prepare_data_and_model(args):
-
     ret = prepare_data(args)
     train_data, preprocessor = ret["train_data"], ret["preprocessor"]
-    
+
     args.batch_size = args.config["batch_size"]
     dim_in = train_data.num_features_processed
     if args.config["act"] == 0:
@@ -455,7 +407,8 @@ if __name__ == '__main__':
     parser.add_argument('--wachter_lam_init', type=float, default=1e-3, help='initial lambda for wachter')
     parser.add_argument('--wachter_max_lam_steps', type=int, default=10, help='max lambda steps for wachter')
     parser.add_argument('--remove_pct', default=None, type=float, help='percentage of data points to remove for LOO')
-    parser.add_argument('--removal_start', type=float, default=0, help='Where to start removal, i.e., if 0 start at x[0]. If 1, start at x[remove_pct*n], etc.')
+    parser.add_argument('--removal_start', type=float, default=0,
+                        help='Where to start removal, i.e., if 0 start at x[0]. If 1, start at x[remove_pct*n], etc.')
 
     # training args
     parser.add_argument('--epoch', type=int, default=50, help='number of epochs to train')

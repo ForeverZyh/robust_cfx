@@ -9,3 +9,5 @@ auto_LiRPA @ git+https://github.com/Verified-Intelligence/auto_LiRPA.git
 wandb
 lime==0.2.0.1
 choix==0.3.5
+foolbox
+adversarial-robustness-toolbox
