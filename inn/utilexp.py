@@ -21,7 +21,6 @@ tf.get_logger().setLevel(40)
 tf.compat.v1.disable_v2_behavior()
 
 
-
 def get_flattened_weight_and_bias(clf, weights=True, biases=True):
     if not weights and not biases:
         return 0
@@ -293,7 +292,7 @@ class HiddenPrints:
 
 
 class UtilExp:
-    def __init__(self, clf, preprocessor, train_X, test_instances, test_labels, dataset = None, target_p=0):
+    def __init__(self, clf, preprocessor, train_X, test_instances, test_labels, dataset=None, target_p=0, target_s=0):
         self.clf = clf
         self.preprocessor = preprocessor
         # self.num_layers = get_clf_num_layers(clf)
@@ -321,6 +320,7 @@ class UtilExp:
         self.inn_delta_non_0 = None
         self.inn_delta_0 = None
         self.target_p = target_p
+        self.target_s = target_s
 
         # # load util
         # self.build_dataset_obj()
@@ -505,15 +505,15 @@ class UtilExp:
         start_time = time.time()
         CEs = []
         is_cfx = []
-        for i, (x,y) in tqdm(enumerate(zip(self.test_instances, self.test_labels))):
+        for i, (x, y) in tqdm(enumerate(zip(self.test_instances, self.test_labels))):
             if robust is False:
                 this_cf = self.run_INN_one(x, y)
             else:
                 this_cf = self.run_INN_one_delta_robust(x, delta=delta)
             CEs.append(this_cf)
-            print("\ndiff", (x-this_cf).sum())
-            print("y: ",y)
-            print("pred is ",self.clf.predict(this_cf.reshape(1,-1)))
+            print("\ndiff", (x - this_cf).sum())
+            print("y: ", y)
+            print("pred is ", self.clf.predict(this_cf.reshape(1, -1)))
             is_cfx.append(self.clf.predict(this_cf.reshape(1, -1))[0] != y)
         print("total computation time in s:", time.time() - start_time)
         assert len(CEs) == len(self.test_instances)
@@ -574,6 +574,7 @@ class UtilExp:
                 CEs.append(ce)
                 is_cfx.append(self.clf.predict(ce.reshape(1, -1))[0] != label)
                 # print(label, is_cfx[-1])
+                # print(np.mean(np.abs(x - ce)), np.mean(np.abs(x - ce) > 1e-2))
                 pbar.update(1)
                 cnt += 1
                 valid += is_cfx[-1]
@@ -593,7 +594,8 @@ class UtilExp:
     def run_roar_one(self, x, cat_feats, labels, lamb1=1, lamb22=None, eps=1):
 
         coefficients = intercept = None
-        robust_recourse = RobustRecourse(W=coefficients, W0=intercept, feature_costs=None, y_target=eps, target_p=self.target_p)
+        robust_recourse = RobustRecourse(W=coefficients, W0=intercept, feature_costs=None, y_target=eps,
+                                         target_p=self.target_p, target_s=self.target_s)
         with HiddenPrints():
             if lamb22 is None:
                 lamb2 = robust_recourse.choose_lambda(x.reshape(1, -1), self.clf.predict, self.train_X,

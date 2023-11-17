@@ -59,7 +59,7 @@ def counterfactual_recourse(torch_model, x, feature_costs=None, y_target=1.0, n_
 class RobustRecourse():
     def __init__(self, W=None, W0=None, y_target=1,
                  delta_max=0.1, feature_costs=None,
-                 pW=None, pW0=None, target_p=0):
+                 pW=None, pW0=None, target_p=0, target_s=0):
         self.set_W(W)
         self.set_W0(W0)
 
@@ -70,6 +70,7 @@ class RobustRecourse():
         self.delta_max = delta_max
         self.feature_costs = feature_costs
         self.target_p = target_p
+        self.target_s = target_s
         if self.feature_costs is not None:
             self.feature_costs = torch.from_numpy(feature_costs).float()
 
@@ -95,7 +96,9 @@ class RobustRecourse():
 
     def l1_cost(self, x_new, x):
         cost = torch.dist(x_new, x, 1)
-        return torch.clamp(cost, min=self.target_p * len(x))
+        return cost
+        # cost_s = torch.norm(x_new - x, 0)
+        # return torch.clamp(cost, min=self.target_p * len(x)) + torch.clamp(cost_s, min=self.target_s * len(x))
 
     def pfc_cost(self, x_new, x):
         cost = torch.norm(self.feature_costs * (x_new - x), 1)
@@ -172,12 +175,13 @@ class RobustRecourse():
             loss_diff = torch.dist(loss_prev, loss, 2)
         return x_new.detach().numpy(), np.concatenate((delta_W.detach().numpy(), delta_W0.detach().numpy()))
 
-
     # Heuristic for picking hyperparam lambda
     def choose_lambda(self, recourse_needed_X, predict_fn, X_train=None, predict_proba_fn=None, cat_feats=None):
         lambdas = np.concatenate((np.array([0.0005, 0.001, 0.005]), np.arange(0.01, 1.1, 0.05)))
         v_old = 0
         interpret = []
+        best_d = np.inf
+        best_lamb = None
         for xi, x in enumerate(recourse_needed_X):
             np.random.seed(xi)
             coefficients, intercept = lime_explanation(predict_proba_fn,
@@ -188,6 +192,7 @@ class RobustRecourse():
         for i, lamb in enumerate(lambdas):
             print("Testing lambda:%f" % lamb)
             recourses = []
+            distance_to_target = []
             for xi, x in enumerate(recourse_needed_X):
 
                 # Call lime if nonlinear
@@ -201,16 +206,25 @@ class RobustRecourse():
                     self.set_W0(None)
                 else:
                     r, _ = self.get_recourse(x, lamb2=lamb)
+                p = np.mean(np.abs(r - x))
+                s = np.mean(np.abs(r - x) > 1e-2)
                 recourses.append(r)
+                distance_to_target.append(abs(self.target_p - p) + abs(self.target_s - s))
 
             v = recourse_validity(predict_fn, recourses, target=self.y_target.numpy())
+            d = np.sum(distance_to_target)
+            if d < best_d:
+                best_d = d
+                best_lamb = lamb
             if v >= v_old:
                 v_old = v
-            else:   # return last lambda when the counterfactual validity starts to drop
-                li = max(0, i - 1)
-                return lambdas[li]
+            # else:   # return last lambda when the counterfactual validity starts to drop
+            #     li = max(0, i - 1)
+            #     return lambdas[li]
+            else:  # return the best lambda
+                return best_lamb if best_lamb is not None else lambdas[0]
 
-        return lamb
+        return best_lamb
 
     def choose_delta(self, recourse_needed_X, predict_fn, X_train=None,
                      predict_proba_fn=None, lamb=0.1, cat_feats=None):

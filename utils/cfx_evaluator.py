@@ -120,7 +120,7 @@ class CFXEvaluator:
         cont_spars = torch.sum(torch.abs(torch.tensor(x[x_cont_feat_i]) - cfx_x[x_cont_feat_i]) > TOLERANCE).item()
         for i in list(self.train_data.ordinal_features) + list(self.train_data.discrete_features):
             idxs = self.train_data.feat_var_map[i]
-            if torch.sum(torch.abs(torch.tensor(x[idxs]) - cfx_x[idxs]) > 0).item() > 0:
+            if torch.sum(torch.abs(torch.tensor(x[idxs]) - cfx_x[idxs]) > TOLERANCE).item() > 0:
                 discrete_spars += 1
         return (cont_spars + discrete_spars) / len(self.train_data.feat_var_map)
     

@@ -94,7 +94,7 @@ def main(args):
         cfx_filename = os.path.join(args.cfx_dir, args.model_type + args.dataset + args.cfx + args.technique + str(i))
         if not os.path.exists(cfx_filename) or args.force_regen_cfx:
             util_exp = UtilExp(model, preprocessor, train_data.X, test_data.X, test_data.y, train_data,
-                               target_p=args.target_p)
+                               target_p=args.target_p, target_s=args.target_s)
 
             util_exp.inn_delta_non_0 = Inn.from_IBPModel(model.encoder_net_ori)
             util_exp.inn_delta_non_0.act = args.config["act"]
@@ -121,6 +121,7 @@ if __name__ == "__main__":
     parser.add_argument("technique", type=str, choices=["inn", "roar"],
                         help="which CFX generation technique to use (ROAR or INN)")
     parser.add_argument('--target_p', type=float, default=0, help="target proximity for ROAR")
+    parser.add_argument('--target_s', type=float, default=0, help="target sparsity for ROAR")
     parser.add_argument('--cfx', type=str, default="counternet", help="only counternet model is trained for now")
     parser.add_argument("--cfx_dir", default="saved_cfxs", help="directory where cfxs are saved")
     parser.add_argument("--model_dir", default='trained_models',
