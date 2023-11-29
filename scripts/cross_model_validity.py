@@ -28,7 +28,7 @@ samples that had a valid CFX.
 warnings.filterwarnings("ignore", category=ResourceWarning)
 
 def main(args):
-    models = []
+    models, orig_models = [], []
     cfxs = []
     is_cfxs = []
     all_preds = []
@@ -40,14 +40,24 @@ def main(args):
                 chtcnum = ""
         else:
             chtcnum = args.chtc_num
-        args.model = args.model_type + args.dataset + chtcnum + "_" + str(i)
+        args.model_name = args.model_type + args.dataset + chtcnum + "_" + str(i)
+        if args.finetune:
+            ret = prepare_data_and_model(args)
+            train_data, test_data, orig_model, minmax = ret["train_data"], ret["test_data"], ret["model"], ret["minmax"]
+            orig_model.load(os.path.join(args.save_dir, args.model_name))
+            orig_model.eval()
+            orig_models.append(orig_model)
+            args.model_name += "_finetune"
         ret = prepare_data_and_model(args)
         train_data, test_data, model, minmax = ret["train_data"], ret["test_data"], ret["model"], ret["minmax"]
-        model.load(os.path.join(args.model_dir, args.model))
+        model.load(os.path.join(args.save_dir, args.model_name))
         model.eval()
         models.append(model)
 
-        preds = model.forward_point_weights_bias(torch.tensor(test_data.X).float()).argmax(dim=-1)
+        if args.finetune:
+            preds = orig_model.forward_point_weights_bias(torch.tensor(test_data.X).float()).argmax(dim=-1)
+        else:
+            preds = model.forward_point_weights_bias(torch.tensor(test_data.X).float()).argmax(dim=-1)
         all_preds.append(preds)
 
         # load cfx
@@ -59,6 +69,7 @@ def main(args):
         else:
             basefile = args.model_type + args.dataset + chtcnum + "_"
         cfx_filename = os.path.join(args.cfx_dir, basefile + str(i))
+
         with open(cfx_filename, 'rb') as f:
             cfx_x, is_cfx = pickle.load(f)
             cfxs.append(torch.tensor(cfx_x))
@@ -77,24 +88,40 @@ def main(args):
             else:
                 l2_norms.append([l2_norm])
                 l2_norm_normeds.append([l2_norm_normed])
-        for j in range(args.model_cnt):
-            if i != j:
-                if i < j and args.verbose:
-                    print(f"==={i} vs. {j}")
-                    print(models[i].difference(models[j]))
-                this_model = models[i]
-                these_preds = all_preds[i]
-                these_cfx = cfxs[j]
-                these_is_cfx = is_cfxs[j]
+        if args.finetune:
+            this_model = models[i]
+            these_preds = all_preds[i]
+            these_cfx = cfxs[i]
+            these_is_cfx = is_cfxs[i]
 
-                cfx_preds = this_model.forward_point_weights_bias(these_cfx.float()).argmax(dim=1)
+            cfx_preds = this_model.forward_point_weights_bias(these_cfx.float()).argmax(dim=1)
 
-                is_valid = torch.where(these_is_cfx, these_preds != cfx_preds, torch.tensor([False]))
-                is_valid_pct = torch.sum(is_valid).item() / torch.sum(these_is_cfx).item()
-                is_valid_overall_pct = torch.sum(is_valid).item() / len(is_valid)
+            is_valid = torch.where(these_is_cfx, these_preds != cfx_preds, torch.tensor([False]))
+            is_valid_pct = torch.sum(is_valid).item() / torch.sum(these_is_cfx).item()
+            is_valid_overall_pct = torch.sum(is_valid).item() / len(is_valid)
 
-                data = [is_valid_pct, is_valid_overall_pct]
-                all_data.append(data)
+            data = [is_valid_pct, is_valid_overall_pct]
+            all_data.append(data)
+        else:
+            for j in range(args.model_cnt):
+                if i != j:
+                    if i < j and args.verbose:
+                        print(f"==={i} vs. {j}")
+                        print(models[i].difference(models[j]))
+                    # model and preds comes from original model, cfxs come from finetuned model
+                    this_model = models[i]
+                    these_preds = all_preds[i]
+                    these_cfx = cfxs[j]
+                    these_is_cfx = is_cfxs[j]
+
+                    cfx_preds = this_model.forward_point_weights_bias(these_cfx.float()).argmax(dim=1)
+
+                    is_valid = torch.where(these_is_cfx, these_preds != cfx_preds, torch.tensor([False]))
+                    is_valid_pct = torch.sum(is_valid).item() / torch.sum(these_is_cfx).item()
+                    is_valid_overall_pct = torch.sum(is_valid).item() / len(is_valid)
+
+                    data = [is_valid_pct, is_valid_overall_pct]
+                    all_data.append(data)
 
     l2_norms = np.mean(np.array(l2_norms), axis=-1)
     l2_norm_normeds = np.mean(np.array(l2_norm_normeds), axis=-1)
@@ -114,7 +141,7 @@ if __name__ == "__main__":
     parser.add_argument("cfx_technique", help="ours, ibp, crownibp, or none")
     parser.add_argument("--chtc_num", help="override chtc num lookup", default=None)
     parser.add_argument("--cfx_dir", default="saved_cfxs", help="directory where cfxs are saved")
-    parser.add_argument("--model_dir", default='trained_models',
+    parser.add_argument("--save_dir", default='trained_models',
                         help="directory where models are saved, if omitted will be trained_models")
     parser.add_argument('--onehot', action='store_true', help='whether to use one-hot encoding')
     parser.add_argument('--model_cnt', type=int, default=10, help='how many models trained for each dataset')
@@ -123,6 +150,7 @@ if __name__ == "__main__":
     parser.add_argument("--epoch", type=int, default=100)
     parser.add_argument('--eps', type=float, default=0.2)
     parser.add_argument('--r', type=float, default=0.05)
+    parser.add_argument('--finetune', action='store_true')
     # parser.add_argument('--seed', default=0)
 
     # parser.add_argument('--epsilon', type=float, default=1e-2, help='epsilon for IBP')

@@ -73,8 +73,8 @@ def get_cfx(file, dataset):
             else:
                 return 'counternet'
         except:
-            print("error: can't identify CFX generation method")
-            return -1
+            print("error: can't identify CFX generation method -- using counternet as the default")
+            return "counternet"
         
 def get_epoch_eps_r(file, dataset):
     try:

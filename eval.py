@@ -64,12 +64,13 @@ def create_CFX(args, model, minmax, train_data, test_data):
 
 def main(args):
     seed_everything(args.seed)
+    args.model_name = args.model
     ret = prepare_data_and_model(args)
     train_data, test_data, model, minmax = ret["train_data"], ret["test_data"], ret["model"], ret["minmax"]
     if args.num_to_run is not None:
         test_data.X = test_data.X[:args.num_to_run]
         test_data.y = test_data.y[:args.num_to_run]
-
+            
     model.load(os.path.join(args.save_dir, args.model))
     model.eval()
 
@@ -81,6 +82,7 @@ def main(args):
 
     if not os.path.exists(args.cfx_filename):
         print("did not find ", args.cfx_filename)
+            
         cfx_x, is_cfx = create_CFX(args, model, minmax, train_data, test_data)
         with open(args.cfx_filename, 'wb') as f:
             pickle.dump((cfx_x, is_cfx), f)
@@ -136,7 +138,7 @@ if __name__ == "__main__":
     parser.add_argument('--skip_milp', action='store_true', help='if true, skip MILP verification')
     parser.add_argument("--eps", type=float, default=None, help="override epsilon in config file")
     parser.add_argument("--eps_ratio", type=float, default=None, help="override epsilon ratio in config file")
-
+    
     args = parser.parse_args()
     with open(args.config, 'r') as f:
         args.config = json.load(f)

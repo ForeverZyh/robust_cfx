@@ -144,9 +144,8 @@ def train_IBP(train_data, test_data, model: VerifyModel, cfx_method, onehot, fil
     for epoch in range(max_epochs):
         model.eval()
         wandb_log = {}
-        if epoch % cfx_generation_freq == 0 and epoch > 0:
+        if epoch % cfx_generation_freq == 0 and (epoch > 0 or args.finetune):
             # generate CFX
-            # TODO parallelize CFX generation? might not be necessary if moving to GPUs
             if not args.inc_regenerate:
                 regenerate = np.ones(ori_train_len).astype(bool)
             if cfx_method == "proto":
@@ -231,7 +230,7 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
         wandb_log = {"ratio": ratio}
         model.eval()
         # model.encoder_net_ori.set_eps_ratio(eps_ratio)
-        if epoch % cfx_generation_freq == 0 and epoch > 0:
+        if epoch % cfx_generation_freq == 0 and (epoch > 0 or args.finetune):
             if not args.inc_regenerate or is_cfx is None:
                 regenerate = torch.ones(ori_train_len).bool()
             else:
@@ -383,6 +382,10 @@ def prepare_data_and_model(args):
         model_ori = FNN(dim_in, 2, args.config["FNN_dims"], epsilon=args.epsilon, bias_epsilon=args.bias_epsilon,
                         activation=act)
         model = VerifyModel(model_ori, dummy_input_shape=train_data.X[:2].shape, loss_func=args.config["loss_1"])
+
+
+    model.load(os.path.join(args.save_dir, args.model_name))
+
     ret["model"] = model
     return ret
 
@@ -409,6 +412,7 @@ if __name__ == '__main__':
     parser.add_argument('--remove_pct', default=None, type=float, help='percentage of data points to remove for LOO')
     parser.add_argument('--removal_start', type=float, default=0,
                         help='Where to start removal, i.e., if 0 start at x[0]. If 1, start at x[remove_pct*n], etc.')
+    parser.add_argument('--finetune', action='store_true', help='whether to finetune the model')
 
     # training args
     parser.add_argument('--epoch', type=int, default=50, help='number of epochs to train')
@@ -426,12 +430,23 @@ if __name__ == '__main__':
     parser.add_argument('--inc_regenerate', action='store_true',
                         help='whether to regenerate CFXs incrementally for those that are no longer CFX each time')
     args = parser.parse_args()
+
+    # If finetuning, no need to warmup
+    if args.finetune:
+        args.warm_up_epoch_pct = 0
+        args.linear_scaling_epoch_pct /= 2
     args.fixed_ratio_epoch_pct = 1 - args.linear_scaling_epoch_pct - args.warm_up_epoch_pct
     assert 0 <= args.warm_up_epoch_pct <= 1 and 0 <= args.linear_scaling_epoch_pct <= 1 and \
            0 <= args.fixed_ratio_epoch_pct <= 1
+    
+
     with open(args.config, 'r') as f:
         args.config = json.load(f)
     args.lr = args.config["lr"]
+    if args.finetune:
+        args.lr /= 5
+    
+
     if args.wandb:
         args.wandb = wandb.init(project="robust_cfx", name=args.model_name, config=args.__dict__)
     else:
@@ -441,6 +456,7 @@ if __name__ == '__main__':
         os.makedirs(args.save_dir)
 
     seed_everything(args.seed)
+
     if args.model == "Standard":
         args.ratio = 0
         args.cfx_generation_freq = args.epoch + 1  # never generate cfx
@@ -451,12 +467,16 @@ if __name__ == '__main__':
 
     ret = prepare_data_and_model(args)
 
+    model_filename = os.path.join(args.save_dir, args.model_name)
+    if args.finetune:
+        model_filename += "_finetune"
+    
     if args.cfx == "counternet":
         model = train_IBP_counternet(ret["train_data"], ret["test_data"], ret["model"],
-                                     os.path.join(args.save_dir, args.model_name))
+                                     model_filename)
     else:
         model = train_IBP(ret["train_data"], ret["test_data"], ret["model"], args.cfx, args.onehot,
-                          os.path.join(args.save_dir, args.model_name))
+                          model_filename)
 
     if args.wandb is not None:
         args.wandb.finish()
