@@ -36,7 +36,7 @@ class Counterfactual(object):
         self.batch_size = batch_size
 
         # 1. generate counterfactual
-        x_adv = self.generate_counterfactual(x,
+        x_adv, is_adv = self.generate_counterfactual(x,
                                              batch_size=batch_size,
                                              **kwargs)
         # Run SNS search
@@ -47,6 +47,7 @@ class Counterfactual(object):
         pred_adv = np.argmax(self.model.predict(x_adv, batch_size=self.batch_size), -1)
         # 3. check if counterfactual is valid
         is_valid = self.is_valid(pred_adv)
+        print("are is_valid and is_adv equal? (should be)", (is_valid == is_adv).all())
         return x_adv, pred_adv, is_valid
 
     def get_original_prediction(self, x, original_pred_sparse):
@@ -129,7 +130,7 @@ class IterativeSearch(Counterfactual):
 
         adv_x = adv_x[is_adv]
 
-        return adv_x
+        return adv_x, is_adv
 
 
 class PGDsL2(Counterfactual):
@@ -152,5 +153,5 @@ class PGDsL2(Counterfactual):
         if np.sum(is_adv) < 1:
             raise RuntimeError("No adversarial samples found")
         else:
-            adv_x = adv_x[is_adv]
-            return adv_x
+            # adv_x = adv_x[is_adv]
+            return adv_x, is_adv

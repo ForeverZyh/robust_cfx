@@ -18,6 +18,8 @@ from utils.utilities import FNNDims
 from utils.dataset import prepare_data
 
 
+num_to_run = 500
+
 def main(args):
     ret = prepare_data(args)
     X_train = np.array(ret["train_data"].X).astype(np.float32)
@@ -50,7 +52,7 @@ def main(args):
 
     model = model.model
 
-    original_preds = model.predict(X_test[:128]).argmax(axis=-1)
+    original_preds = model.predict(X_test[:num_to_run]).argmax(axis=-1)
 
     sns_fn = StableNeighborSearch(model,
                                   clamp=[X_train.min(), X_train.max()],
@@ -70,7 +72,7 @@ def main(args):
                                          norm=1,
                                          sns_fn=sns_fn)
 
-        cf, pred_cf, is_valid = L1_iter_search(X_test[:128])
+        cf, pred_cf, is_valid = L1_iter_search(X_test[:num_to_run])
     elif args.technique == 'l2':
         L2_iter_search = IterativeSearch(model,
                                          clamp=[X_train.min(), X_train.max()],
@@ -89,21 +91,21 @@ def main(args):
                                  nb_iters=100,
                                  eps_iter=0.04,
                                  sns_fn=sns_fn)
-        cf, pred_cf, is_valid = pgd_iter_search(X_test[:128], num_interpolations=10, batch_size=64)
+        cf, pred_cf, is_valid = pgd_iter_search(X_test[:num_to_run], num_interpolations=10, batch_size=64)
 
-    if not is_valid:
+    if not ( is_valid.sum() / len(is_valid) ) == 1:
         # their validity is just true/false -- unsure what exactly.
         print("Problem: is_valid is ", is_valid)
 
     # check validity by seeing that pred_cf != original preds
-    validity = (original_preds != pred_cf).astype(int)
-
+    validity = (is_valid and (original_preds != pred_cf)).astype(int)
+    print("validity is ", validity)
     # save cf
     if not os.path.exists(args.cfx_save_dir):
         os.makedirs(args.cfx_save_dir)
 
     cfx_filename = os.path.join(args.cfx_save_dir,
-                                args.dataset_name + "_" + args.technique + "_sns" + str(args.seed) + ".npy")
+                                args.model_type + args.dataset_name + "_" + args.technique + "_sns" + str(args.seed) + ".npy")
     with open(cfx_filename, 'wb') as f:
         pickle.dump((cf, validity), f)
 
@@ -120,6 +122,8 @@ if __name__ == "__main__":
     parser.add_argument('--onehot', action='store_true', help='whether to use one-hot encoding')
 
     args = parser.parse_args()
+
+    args.model_type = args.model.split(args.dataset_name)[0]
 
     if args.dataset_name == 'german':
         args.config = 'assets/german_credit.json'
