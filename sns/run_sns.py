@@ -48,7 +48,7 @@ def main(args):
                                    config=args.config)
 
     model.build()
-    model.load(os.path.join(args.model_dir, args.model))
+    model.load(os.path.join(args.save_dir, args.model_name))
 
     model = model.model
 
@@ -112,9 +112,9 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('model')
+    parser.add_argument('model_name')
     parser.add_argument('dataset_name')
-    parser.add_argument('--model_dir', default="sns/saved_keras_models")
+    parser.add_argument('--save_dir', default="sns/saved_keras_models")
     parser.add_argument('--technique', default="l1", choices=['l1', 'l2', 'pgd'],
                         help="how to generate CFX during SNS (l1, l2, pgd)")
     parser.add_argument('--cfx_save_dir', default="sns/saved_cfxs", help="where to save generated cfxs")
@@ -123,7 +123,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    args.model_type = args.model.split(args.dataset_name)[0]
+    args.model_type = args.model_name.split(args.dataset_name)[0]
 
     if args.dataset_name == 'german':
         args.config = 'assets/german_credit.json'

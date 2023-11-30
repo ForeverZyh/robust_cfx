@@ -14,7 +14,8 @@ def main(args):
     ret = prepare_data_and_model(args)
     train_data, test_data, model_pytorch, minmax = ret["train_data"], ret["test_data"], ret["model"], ret[
         "preprocessor"]
-    model_pytorch.load(os.path.join(args.model_dir, args.model))
+    
+    model_pytorch.load(os.path.join(args.save_dir, args.model_name))
 
     if args.config["act"] == 0:
         act = tf.keras.activations.relu
@@ -45,16 +46,16 @@ def main(args):
          model_pytorch.encoder_net_ori.final_fc.linear.bias.detach().numpy()])
 
     print(model.model.predict(train_data.X[:10]))
-    model.save(os.path.join(args.save_dir, args.model))
-    model.load(os.path.join(args.save_dir, args.model))
+    model.save(os.path.join(args.new_model_dir, args.model_name))
+    model.load(os.path.join(args.new_model_dir, args.model_name))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("model", help="name of model to convert")
+    parser.add_argument("model_name", help="name of model to convert")
     parser.add_argument("dataset")
-    parser.add_argument("--model_dir", default="trained_models", help="directory where pytorch model is saved")
-    parser.add_argument("--save_dir", default="sns/saved_keras_models", help="directory to save keras model to")
+    parser.add_argument("--save_dir", default="trained_models", help="directory where pytorch model is saved")
+    parser.add_argument("--new_model_dir", default="sns/saved_keras_models", help="directory to save keras model to")
 
     args = parser.parse_args()
 
