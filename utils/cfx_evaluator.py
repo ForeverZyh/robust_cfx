@@ -59,6 +59,7 @@ class CFXEvaluator:
         ret += f"Robustness (by our over-approximation): " \
                f"{round(torch.sum(is_real_cfx).item() / total_valid * 100, 2)}%" \
                f" ({torch.sum(is_real_cfx).item()}/{total_valid})\n"
+        print(ret)
 
         solver_robust_cnt = 0
         solver_bound_better = 0
@@ -69,17 +70,11 @@ class CFXEvaluator:
                         zip(self.test_data.X, pred_y, self.cfx_x, is_cfx, cfx_output, is_real_cfx)):
                     if is_cfx_:
                         solver = optsolver.OptSolver(self.test_data, self.inn, 1 - y, x, mode=1, x_prime=cfx_x_)
-                        res, bound = None, None
-                        with concurrent.futures.ThreadPoolExecutor() as executor:
-                            future = executor.submit(solver.compute_inn_bounds)
-
-                            try:
-                                res, bound = future.result(timeout=15)
-                            except concurrent.futures.TimeoutError:
-                                print("Operation timed out")
+                        res, bound = solver.compute_inn_bounds()
                         if bound is not None and abs(bound - loose_bound.item()) > TOLERANCE:
                             solver_bound_better += 1
                         if res is None:
+                            print("Timeout!")
                             solver_robust_cnt += our_robust.item()
                         elif res == 1:
                             solver_robust_cnt += 1
@@ -87,8 +82,8 @@ class CFXEvaluator:
                         pbar.set_postfix({'robust_pct': round(solver_robust_cnt / solver_cnt * 100, 2)})
                     pbar.update(1)
             ret += f"Robustness (by the MILP solver): " \
-                f"{round(solver_robust_cnt / total_valid * 100, 2)}%" \
-                f" ({solver_robust_cnt}/{total_valid})\n"
+                   f"{round(solver_robust_cnt / total_valid * 100, 2)}%" \
+                   f" ({solver_robust_cnt}/{total_valid})\n"
             ret += f"{solver_bound_better} solver bounds are better than ours.\n"
 
         # Proximity & Sparsity
@@ -123,7 +118,7 @@ class CFXEvaluator:
             if torch.sum(torch.abs(torch.tensor(x[idxs]) - cfx_x[idxs]) > TOLERANCE).item() > 0:
                 discrete_spars += 1
         return (cont_spars + discrete_spars) / len(self.train_data.feat_var_map)
-    
+
     def log(self):
         if self.log_filename is not None:
             with open(self.log_filename, "w") as f:

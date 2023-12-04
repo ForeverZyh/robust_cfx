@@ -11,7 +11,7 @@ or to compute lower/upper bound of an INN (mode 1 with epsilon not used)
 
 
 class OptSolver:
-    def __init__(self, dataset, inn, y_prime, x, mode=0, eps=0.0001, M=1000, x_prime=None):
+    def __init__(self, dataset, inn, y_prime, x, mode=0, eps=0.0001, M=1000, x_prime=None, ours=True):
         self.mode = mode  # mode 0: compute counterfactual, mode 1: compute lower/upper bound of INN given a delta
         self.dataset = dataset
         self.inn = inn
@@ -25,9 +25,11 @@ class OptSolver:
         if x_prime is not None:
             self.x_prime = np.round(x_prime, 6)
         self.output_node_name = None
+        self.ours = ours  # whether to add additional constraints such that the M_{f,x} contains f' where f'(x) != f(x).
 
     def add_input_variable_constraints(self):
         node_var = dict()
+        node_var_x = dict()  # the node variables for the explainee instance x
         for feat_idx, feat_mapping in self.dataset.feat_var_map.items():
             # cases by feature type, add different types of variables and constraints
             if self.dataset.feature_types[feat_idx] == DataType.DISCRETE:
@@ -36,12 +38,16 @@ class OptSolver:
                     if self.mode == 1:
                         node_var[var_idx] = self.model.addVar(lb=-float('inf'), vtype=GRB.CONTINUOUS,
                                                               name='x_disc_0_' + str(var_idx))
+                        node_var_x[var_idx] = self.model.addVar(lb=-float('inf'), vtype=GRB.CONTINUOUS,
+                                                                name='x_disc_x_' + str(var_idx))
                     else:
                         node_var[var_idx] = self.model.addVar(vtype=GRB.BINARY, name='x_disc_0_' + str(var_idx))
                     disc_var_list.append(node_var[var_idx])
                     if self.mode == 1:
                         self.model.addConstr(node_var[var_idx] == self.x_prime[var_idx],
                                              name="lbINN_disc_0_" + str(var_idx))
+                        self.model.addConstr(node_var_x[var_idx] == self.x[var_idx],
+                                             name="lbINN_disc_x_" + str(var_idx))
                 self.model.update()
                 if self.mode == 0:
                     self.model.addConstr(quicksum(disc_var_list) == 1, name='x_disc_0_feat' + str(feat_idx))
@@ -53,12 +59,16 @@ class OptSolver:
                     if self.mode == 1:
                         node_var[var_idx] = self.model.addVar(lb=-float('inf'), vtype=GRB.CONTINUOUS,
                                                               name='x_ord_0_' + str(var_idx))
+                        node_var_x[var_idx] = self.model.addVar(lb=-float('inf'), vtype=GRB.CONTINUOUS,
+                                                                name='x_ord_x_' + str(var_idx))
                     else:
                         node_var[var_idx] = self.model.addVar(vtype=GRB.BINARY, name='x_ord_0_' + str(var_idx))
                     self.model.update()
                     if self.mode == 1:
                         self.model.addConstr(node_var[var_idx] == self.x_prime[var_idx],
                                              name="lbINN_disc_0_" + str(var_idx))
+                        self.model.addConstr(node_var_x[var_idx] == self.x[var_idx],
+                                             name="lbINN_disc_x_" + str(var_idx))
                     if i != 0 and self.mode == 0:
                         self.model.addConstr(prev_var >= node_var[var_idx],
                                              name='x_ord_0_var' + str(var_idx - 1) + '_geq_' + str(var_idx))
@@ -72,16 +82,20 @@ class OptSolver:
                 if self.mode == 1:
                     node_var[var_idx] = self.model.addVar(lb=-float('inf'), ub=1, vtype=GRB.SEMICONT,
                                                           name="x_cont_0_" + str(var_idx))
+                    node_var_x[var_idx] = self.model.addVar(lb=-float('inf'), ub=1, vtype=GRB.SEMICONT,
+                                                            name="x_cont_x_" + str(var_idx))
                 else:
                     node_var[var_idx] = self.model.addVar(lb=0, ub=1, vtype=GRB.SEMICONT,
                                                           name="x_cont_0_" + str(var_idx))
                 if self.mode == 1:
                     self.model.addConstr(node_var[var_idx] == self.x_prime[var_idx],
-                                         name="lbINN_disc_0_" + str(var_idx))
+                                         name="lbINN_cont_0_" + str(var_idx))
+                    self.model.addConstr(node_var_x[var_idx] == self.x[var_idx],
+                                         name="lbINN_cont_x_" + str(var_idx))
             self.model.update()
-        return node_var
+        return node_var, node_var_x
 
-    def add_node_variables_constraints(self, node_vars, aux_vars):
+    def add_node_variables_constraints(self, node_vars, aux_vars, cons_x=False):
         """
         create variables for nodes. Each node has the followings:
         node variable n for the final node value after ReLU,
@@ -104,69 +118,87 @@ class OptSolver:
                 # hidden layers
                 if i != (self.inn.num_layers - 1):
                     node_var[node.index] = self.model.addVar(lb=-float('inf'), vtype=GRB.CONTINUOUS,
-                                                             name='n_' + str(node))
-                    aux_var[node.index] = self.model.addVar(vtype=GRB.BINARY, name='a_' + str(node))
+                                                             name='n_' + str(node) + str(cons_x))
+                    aux_var[node.index] = self.model.addVar(vtype=GRB.BINARY, name='a_' + str(node) + str(cons_x))
                     self.model.update()
-                    lb = quicksum(
-                        (self.inn.weights[(node1, node)].lb * node_vars[i - 1][node1.index]) for
-                        node1 in self.inn.nodes[i - 1]) + self.inn.biases[node].lb
-                    ub = quicksum(
-                        (self.inn.weights[(node1, node)].ub * node_vars[i - 1][node1.index]) for
-                        node1 in self.inn.nodes[i - 1]) + self.inn.biases[node].ub
+                    out = quicksum(
+                        (self.inn.weights[(node1, node)].var * node_vars[i - 1][node1.index]) for
+                        node1 in self.inn.nodes[i - 1]) + self.inn.biases[node].var
                     # constraint 1: node >= 0
                     if self.act == 0:
                         self.model.addConstr(node_var[node.index] >= 0, name="forward_pass_node_" + str(node) + "C1")
                     else:
-                        self.model.addConstr(node_var[node.index] >= self.act * lb,
+                        self.model.addConstr(node_var[node.index] >= self.act * out,
                                              name="forward_pass_node_" + str(node) + "C1")
                     # constraint 2: node <= M(1-a)
                     if self.act == 0:
                         self.model.addConstr(self.M * (1 - aux_var[node.index]) >= node_var[node.index],
-                                            name="forward_pass_node_" + str(node) + "C2")
+                                             name="forward_pass_node_" + str(node) + "C2")
                     else:
-                        self.model.addConstr(self.M * (1 - aux_var[node.index]) + self.act * ub >= node_var[node.index],
-                                            name="forward_pass_node_" + str(node) + "C2")
+                        self.model.addConstr(self.M * (1 - aux_var[node.index]) + self.act * out >= node_var[node.index],
+                                             name="forward_pass_node_" + str(node) + "C2")
                     # constraint 3: node <= ub(W)x + ub(B) + Ma
-                    self.model.addConstr(quicksum(
-                        (self.inn.weights[(node1, node)].ub * node_vars[i - 1][node1.index]) for
-                        node1 in self.inn.nodes[i - 1]) + self.inn.biases[node].ub + self.M * aux_var[node.index] >=
-                                         node_var[node.index],
+                    self.model.addConstr(out + self.M * aux_var[node.index] >= node_var[node.index],
                                          name="forward_pass_node_" + str(node) + "C3")
                     # constraint 4: node >= lb(W)x + lb(B)
-                    self.model.addConstr(lb <= node_var[node.index],
+                    self.model.addConstr(out <= node_var[node.index],
                                          name="forward_pass_node_" + str(node) + "C4")
                 else:
                     node_var[node.index] = self.model.addVar(lb=-float('inf'), vtype=GRB.CONTINUOUS,
-                                                             name='n_' + str(node))
-                    self.output_node_name = 'n_' + str(node)
+                                                             name='n_' + str(node) + str(cons_x))
+                    if not cons_x:
+                        self.output_node_name = 'n_' + str(node) + str(cons_x)
                     # constraint 1: node <= ub(W)x + ub(B)
                     self.model.addConstr(quicksum(
-                        (self.inn.weights[(node1, node)].ub * node_vars[i - 1][node1.index]) for
-                        node1 in self.inn.nodes[i - 1]) + self.inn.biases[node].ub >= node_var[node.index],
+                        (self.inn.weights[(node1, node)].var * node_vars[i - 1][node1.index]) for
+                        node1 in self.inn.nodes[i - 1]) + self.inn.biases[node].var >= node_var[node.index],
                                          name="output_node_pass_" + str(node) + "C1")
                     # constraint 2: node >= lb(W)x + lb(B)
                     self.model.addConstr(quicksum(
-                        (self.inn.weights[(node1, node)].lb * node_vars[i - 1][node1.index]) for
-                        node1 in self.inn.nodes[i - 1]) + self.inn.biases[node].lb <= node_var[node.index],
+                        (self.inn.weights[(node1, node)].var * node_vars[i - 1][node1.index]) for
+                        node1 in self.inn.nodes[i - 1]) + self.inn.biases[node].var <= node_var[node.index],
                                          name="output_node_pass_" + str(node) + "C2")
-                    if self.mode == 1:
+                    if self.mode == 1 and not cons_x:
                         continue
                     # constraint3: counterfactual constraint for mode 0
-                    if self.y_prime:
-                        self.model.addConstr(node_var[node.index] - self.eps >= 0.0, name="output_node_lb_>=0")
+                    if self.mode == 0:
+                        if self.y_prime:
+                            self.model.addConstr(node_var[node.index] - self.eps >= 0.0, name="output_node_lb_>=0")
+                        else:
+                            self.model.addConstr(node_var[node.index] + self.eps <= 0.0, name="output_node_ub_<0")
                     else:
-                        self.model.addConstr(node_var[node.index] + self.eps <= 0.0, name="output_node_ub_<0")
+                        if self.y_prime:  # y = 0
+                            self.model.addConstr(node_var[node.index] + self.eps <= 0.0, name="output_node_ub_<0")
+                        else:
+                            self.model.addConstr(node_var[node.index] - self.eps >= 0.0, name="output_node_lb_>=0")
                     self.model.update()
             node_vars[i] = node_var
             if i != (self.inn.num_layers - 1):
                 aux_vars[i] = aux_var
         return node_vars, aux_vars
 
+    def add_layer_variables_constraints(self):
+        for i in range(1, self.inn.num_layers):
+            for node in self.inn.nodes[i]:
+                for node1 in self.inn.nodes[i - 1]:
+                    lb, ub = self.inn.weights[(node1, node)].lb, self.inn.weights[(node1, node)].ub
+                    name = 'w_' + str(i) + '_' + str(node1.index) + '_' + str(node.index)
+                    self.inn.weights[(node1, node)].var = self.model.addVar(lb=lb, vtype=GRB.CONTINUOUS, ub=ub,
+                                                                            name=name)
+                lb, ub = self.inn.biases[node].lb, self.inn.biases[node].ub
+                name = 'b_' + str(i) + '_' + str(node.index)
+                self.inn.biases[node].var = self.model.addVar(lb=lb, vtype=GRB.CONTINUOUS, ub=ub, name=name)
+
     def create_constraints(self):
         node_vars = dict()  # dict of {layer number, {Node's idx int, Gurobi variable obj}}
         aux_vars = dict()  # dict of {layer number, {Node's idx int, Gurobi variable obj}}
-        node_vars[0] = self.add_input_variable_constraints()
+        node_vars_x = dict()  # dict of {layer number, {Node's idx int, Gurobi variable obj}}
+        aux_vars_x = dict()  # dict of {layer number, {Node's idx int, Gurobi variable obj}}
+        node_vars[0], node_vars_x[0] = self.add_input_variable_constraints()
+        self.add_layer_variables_constraints()
         node_vars, aux_vars = self.add_node_variables_constraints(node_vars, aux_vars)
+        if self.ours:
+            self.add_node_variables_constraints(node_vars_x, aux_vars_x, cons_x=True)
         return node_vars, aux_vars
 
     def set_objective_l1_l0(self, node_vars):
@@ -255,6 +287,8 @@ class OptSolver:
         node_vars, aux_vars = self.create_constraints()
         self.set_objective_output_node(node_vars)
         self.model.Params.LogToConsole = 0  # disable console output
+        self.model.Params.timeLimit = 15.0
+        self.model.Params.NonConvex = 2
         self.model.optimize()
         res = -1
         bound = None
