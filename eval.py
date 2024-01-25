@@ -81,7 +81,7 @@ def main(args):
     inn.act = args.config["act"]
 
     if not os.path.exists(args.cfx_filename):
-        print("did not find ", args.cfx_filename)
+        print("did not find", args.cfx_filename)
             
         cfx_x, is_cfx = create_CFX(args, model, minmax, train_data, test_data)
         with open(args.cfx_filename, 'wb') as f:
@@ -99,13 +99,20 @@ def main(args):
         cfx_output = model.forward_point_weights_bias(cfx_x).argmax(dim=1)
 
         is_real_cfx = torch.where(torch.tensor(is_cfx))  # ignore indices that failed
+        is_real_cfx_idx = torch.tensor(is_cfx)
+
         # and filter out indices that don't satisfy f(x) != f(cfx)
         # is_real_cfx = torch.where(orig_output[is_real_cfx] != cfx_output[is_real_cfx])
-
         if not torch.all(orig_output[is_real_cfx] != cfx_output[is_real_cfx]):
             print("\n\n\n\n\n\nproblem, some fake CFX included")
-            print(torch.where(orig_output[is_real_cfx] == cfx_output[is_real_cfx]))
-            print("\n\n\n\n\n\n")
+            #print(torch.where(orig_output[is_real_cfx] == cfx_output[is_real_cfx]))
+            print("Correcting the problem by removing",torch.sum(orig_output[is_real_cfx] == cfx_output[is_real_cfx])," instances\n\n\n\n\n\n")
+
+            # create a tensor that "AND"'s is_real_cfx and orig_output == cfx_output
+            is_cfx = torch.logical_and(is_real_cfx_idx, orig_output != cfx_output)
+            with open(args.cfx_filename, 'wb') as f:
+                pickle.dump((cfx_x, is_cfx), f)
+
 
         cfx_eval = CFXEvaluator(cfx_x, is_cfx, model.encoder_verify if args.cfx == "counternet" else model, None,
                                 train_data, test_data, inn, args.log_filename, args.skip_milp)
@@ -123,7 +130,7 @@ if __name__ == "__main__":
     parser.add_argument('--cfx_filename', default=None,
                         help="name of the file where CFX are or should be stored. If blank, use log_name")
     parser.add_argument('--log_name', type=str, default=None, help="name of log file, end with .txt")
-    parser.add_argument('--cfx', type=str, default="wachter", choices=["wachter", "proto", "counternet"])
+    parser.add_argument('--cfx', type=str, default="counternet", choices=["wachter", "proto", "counternet"])
     parser.add_argument('--num_to_run', type=int, default=None, help='number of test examples to run')
 
     parser.add_argument('--onehot', action='store_true', help='whether to use one-hot encoding')
@@ -138,7 +145,8 @@ if __name__ == "__main__":
     parser.add_argument('--skip_milp', action='store_true', help='if true, skip MILP verification')
     parser.add_argument("--eps", type=float, default=None, help="override epsilon in config file")
     parser.add_argument("--eps_ratio", type=float, default=None, help="override epsilon ratio in config file")
-    
+    parser.add_argument("--finetune", action='store_true')
+
     args = parser.parse_args()
     with open(args.config, 'r') as f:
         args.config = json.load(f)

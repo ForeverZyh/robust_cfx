@@ -40,7 +40,7 @@ def main(args):
                 chtcnum = ""
         else:
             chtcnum = args.chtc_num
-        args.model_name = args.model_type + args.dataset + chtcnum + "_" + str(i)
+        args.model_name = args.model_type + args.dataset + chtcnum  + str(i)
         if args.finetune:
             ret = prepare_data_and_model(args)
             train_data, test_data, orig_model, minmax = ret["train_data"], ret["test_data"], ret["model"], ret["minmax"]
@@ -65,9 +65,9 @@ def main(args):
             try:
                 basefile = get_roar_mapping(chtcnum)
             except:
-                basefile = args.model_type + args.dataset + "_"
+                basefile = args.model_type + args.dataset + args.chtc_num + "roar"
         else:
-            basefile = args.model_type + args.dataset + chtcnum + "_"
+            basefile = args.model_type + args.dataset + chtcnum 
         cfx_filename = os.path.join(args.cfx_dir, basefile + str(i))
 
         with open(cfx_filename, 'rb') as f:
@@ -130,7 +130,7 @@ def main(args):
     df = pd.DataFrame(all_data, columns=['validity_all', 'validity_for_cfx'])
     if not os.path.exists(os.path.join("logs", "validity")):
         os.makedirs(os.path.join("logs", "validity"))
-    df.to_csv(os.path.join(args.log_save_dir, args.model_type + args.dataset + chtcnum + "e" + str(args.epoch) \
+    df.to_csv(os.path.join(args.log_save_dir, args.model_type + args.dataset + args.cfx + "e" + str(args.epoch) \
                             + "eps" + str(args.eps) + "r" + str(args.r) + ".csv"), index=False)
 
 
@@ -160,6 +160,8 @@ if __name__ == "__main__":
     args.cfx = "counternet"
     if args.cfx_technique != "none":
         args.cfx += args.cfx_technique
+    if args.chtc_num == "none":
+        args.cfx += "none"
     if args.dataset == 'german':
         args.config = 'assets/german_credit.json'
     else:

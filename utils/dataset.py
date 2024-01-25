@@ -181,6 +181,27 @@ TAIWAN_FEAT = {
     22: DataType.DISCRETE,  # marriage
 }
 
+WHO_FEAT = {
+    0: DataType.CONTINUOUS_REAL,  # adult mortality
+    1: DataType.CONTINUOUS_REAL,  # infant deaths
+    2: DataType.CONTINUOUS_REAL,  # alcohol
+    3: DataType.CONTINUOUS_REAL,  # percentage expenditure
+    4: DataType.CONTINUOUS_REAL,  # hepatitis b
+    5: DataType.CONTINUOUS_REAL,  # measles
+    6: DataType.CONTINUOUS_REAL,  # bmi
+    7: DataType.CONTINUOUS_REAL,  # under-five deaths
+    8: DataType.CONTINUOUS_REAL,  # polio
+    9: DataType.CONTINUOUS_REAL,  # total expenditure
+    10: DataType.CONTINUOUS_REAL,  # diphtheria
+    11: DataType.CONTINUOUS_REAL,  # hiv/aids
+    12: DataType.CONTINUOUS_REAL,  # gdp
+    13: DataType.CONTINUOUS_REAL,  # population
+    14: DataType.CONTINUOUS_REAL,  # thinness 1-19 years
+    15: DataType.CONTINUOUS_REAL,  # thinness 5-9 years
+    16: DataType.CONTINUOUS_REAL,  # income composition of resources
+    17: DataType.CONTINUOUS_REAL,  # schooling
+}
+
 ORDINAL_FEATURES_CREDIT = {"installment_rate": 4, "present_residence": 4, "number_credits": 4}
 DISCRETE_FEATURES_CREDIT = {"status": 4, "credit_history": 5, "purpose": 10, "savings": 5, "employment_duration": 5,
                             "personal_status_sex": 4, "other_debtors": 3, "property": 4, "other_installment_plans": 3,
@@ -434,7 +455,12 @@ class Preprocessor:
             min_val = min_vals[i]
             max_val = max_vals[i]
             df_copy[:, name] = (df_copy[:, name] - min_val) / (max_val - min_val)
-        return df_copy
+
+        def minmax(x):
+            # reverse the scaling we just did
+            return x * (max_val - min_val) + min_val
+        
+        return df_copy, minmax
 
     def make_cont_features(self, data, cont_features):
         self.cont_features = [data.feat_var_map[i][0] for i in cont_features]
@@ -465,9 +491,9 @@ def load_data(data, label, feature_types, preprocessor=None):
         data.X = np.array(data.X)
     if need_make_cont_features:
         preprocessor.make_cont_features(data, cont_features)
-    data.X = preprocessor.min_max_scale(data.X)
+    data.X, minmax = preprocessor.min_max_scale(data.X)
 
-    return data, preprocessor
+    return data, preprocessor, minmax
 
 
 def load_data_v1(data, data_test, label, feature_types):
@@ -483,39 +509,62 @@ def load_data_v1(data, data_test, label, feature_types):
 
 def prepare_data(args):
     ret = {"preprocessor": None, "train_data": None, "test_data": None, "model": None, "minmax": None}
+    if args.finetune:
+        modifier = 'shift'
+    else:
+        modifier = 'orig'
     if args.config["dataset_name"] == "german_credit":
         if args.cfx == 'proto':
             feature_types = CREDIT_FEAT_PROTO
         else:
             feature_types = CREDIT_FEAT
         if args.onehot:
-            train_data, preprocessor = load_data("data/german_train.csv", "credit_risk", feature_types)
-            test_data, _, = load_data("data/german_test.csv", "credit_risk", feature_types, preprocessor)
+            train_data, preprocessor, minmax = load_data("data/german_train.csv", "credit_risk", feature_types)
+            test_data, _, _ = load_data("data/german_test.csv", "credit_risk", feature_types, preprocessor)
             ret["preprocessor"] = preprocessor
+            ret["minmax"] = minmax
         else:
             train_data, test_data, minmax = load_data_v1("data/german_train.csv", "data/german_test.csv",
                                                          "credit_risk", feature_types)
             ret["minmax"] = minmax
     elif args.config["dataset_name"] == "heloc":
         feature_types = HELOC_FEAT
-        train_data, preprocessor = load_data("data/heloc_train.csv", "label", feature_types)
-        test_data, _, = load_data("data/heloc_test.csv", "label", feature_types, preprocessor)
+        train_data, preprocessor, minmax = load_data("data/heloc_train.csv", "label", feature_types)
+        test_data, _, _ = load_data("data/heloc_test.csv", "label", feature_types, preprocessor)
         ret["preprocessor"] = preprocessor
+        ret["minmax"] = minmax
     elif args.config["dataset_name"] == "ctg":
         feature_types = CTG_FEAT
-        train_data, preprocessor = load_data("data/ctg_train.csv", "label", feature_types)
-        test_data, _, = load_data("data/ctg_test.csv", "label", feature_types, preprocessor)
+        train_data, preprocessor,minmax = load_data("data/ctg_orig_train.csv", "label", feature_types)
+        if args.finetune:
+            train_data, _ , _ = load_data("data/ctg_shift_train.csv", "label", feature_types, preprocessor)
+        test_data, _ , _ = load_data("data/ctg_" + modifier + "_test.csv", "label", feature_types, preprocessor)
+        
+        # RANDOM NOISE VERSION (need to uncomment and/or add more complex flags to use this)
+        # train_data, preprocessor = load_data("data/ctg_train.csv", "label", feature_types)
+        # test_data, _, = load_data("data/ctg_test.csv", "label", feature_types, preprocessor)
+        
         ret['preprocessor'] = preprocessor
+        ret['minmax'] = minmax
     elif args.config["dataset_name"] == "student":
         feature_types = STUDENT_FEAT
-        train_data, preprocessor = load_data("data/student_train.csv", "final_result", feature_types)
-        test_data, _, = load_data("data/student_test.csv", "final_result", feature_types, preprocessor)
+        train_data, preprocessor, minmax = load_data("data/student_train.csv", "final_result", feature_types)
+        test_data, _, _ = load_data("data/student_test.csv", "final_result", feature_types, preprocessor)
         ret['preprocessor'] = preprocessor
+        ret['minmax'] = minmax
     elif args.config["dataset_name"] == "taiwan":
         feature_types = TAIWAN_FEAT
-        train_data, preprocessor = load_data("data/taiwan_train.csv", "Y", feature_types)
-        test_data, _, = load_data("data/taiwan_test.csv", "Y", feature_types, preprocessor)
+        train_data, preprocessor, minmax = load_data("data/taiwan_train.csv", "Y", feature_types)
+        test_data, _, _ = load_data("data/taiwan_test.csv", "Y", feature_types, preprocessor)
         ret['preprocessor'] = preprocessor
+        ret['minmax'] = minmax
+    elif args.config["dataset_name"] == 'who':
+        # will be who_orig or who_shift
+        feature_types = WHO_FEAT
+        train_data, preprocessor, minmax = load_data("data/who_" + modifier + "_train.csv", "label", feature_types)
+        test_data, _,  _ = load_data("data/who_" + modifier + "_test.csv", "label", feature_types, preprocessor)
+        ret['preprocessor'] = preprocessor
+        ret['minmax'] = minmax
     else:
         raise NotImplementedError(f"Dataset {args.config['dataset_name']} not implemented")
 

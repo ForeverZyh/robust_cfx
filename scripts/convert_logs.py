@@ -24,12 +24,16 @@ def get_dataset(file):
         return "student"
     elif "taiwan" in file:
         return "taiwan"
+    elif "who" in file:
+        return "who"
     else:
         print("error: can't identify dataset")
         return -1
 
 def get_training_method(file):
     if 'Standard' in file:
+        if 'none' in file:
+            return 'None'
         return 'Standard'
     elif 'IBP' in file:
         return 'IBP'

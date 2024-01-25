@@ -1,33 +1,39 @@
 {
-    "dataset_name": "taiwan",
+    "dataset_name": "who",
     "encoder_dims": [
-        33,
-        50,
-        10
+      100,
+      10
     ],
     "decoder_dims": [
-        10,
-        10
+      10,
+      10
     ],
     "explainer_dims": [
-        10,
-        50
+      10,
+      100
     ],
-    "lr": 0.00005,
+    "FNN_dims": [
+      100,
+      10,
+      10
+    ],
+    "lr": 0.002,
     "lr_decay": 1.0,
     "batch_size": 128,
     "loss_1": "mse",
-    "loss_1_weight": "none",
+    "loss_1_weight" : "none",
     "loss_2": "mse",
     "loss_3": "mse",
     "loss_3_weight" : "none",
     "lambda_1": 1.0,
-    "lambda_2": 0.01,
-    "lambda_3": 1.0,
+    "lambda_2": 0.05,
+    "lambda_3": 0.5,
     "dropout": 0.3,
     "act": 0.01,
     "clip_grad_norm": 0.5,
-    "weight_decay": 0.05, 
-    "eps_ratio": 0.2,
+    "weight_decay": 0.05,
+    "eps_ratio": 0.35,
     "ratio": 0.05
-}
+  }
+    
+  

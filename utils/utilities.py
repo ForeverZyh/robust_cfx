@@ -34,9 +34,11 @@ class FNNDims:
         return self.hidden_dims[-1] == other.in_dim
 
 
-def get_loss_by_type(loss_func):
+def get_loss_by_type(loss_func, weight = None):
     if loss_func == "bce":
-        return nn.BCELoss(reduction="none")
+        if weight is None:
+            return nn.BCELoss(reduction="none")
+        return nn.BCELoss(weight=torch.tensor(weight), reduction="none")
     elif loss_func == "mse":
         return nn.MSELoss(reduction="none")
     else:

@@ -33,7 +33,8 @@ def main(args):
         if args.target_datasets != [] and dataset not in args.target_datasets:
             continue
         training_method = get_training_method(file)
-        print("file: ",file)
+        if training_method == -1:
+            continue
         cfx = get_cfx(file, dataset)
 
         all_data.append([dataset, training_method, cfx, epochs, eps, r, validity.mean(), validity.std(),

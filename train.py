@@ -42,6 +42,7 @@ def eval_chunk(model, test_dataloader, val_dataloader, train_dataloader, epoch, 
 
             print("Epoch", str(epoch), f"{task} acc: ", acc_cnt / total_samples, "test loss: ",
                   total_loss / total_samples)
+            
             update[f"{task}_acc"] = acc_cnt / total_samples
             update[f"{task}_loss"] = total_loss / total_samples
     return update
@@ -53,6 +54,8 @@ def eval_chunk_counternet(model, val_dataloader, epoch):
     total_loss = 0
     total_samples = 0
     total_robust = 0
+    acc_cnt0, acc_cnt1 = 0, 0
+    total0, total1 = 0, 0
     with torch.no_grad():
         for X, y, _ in val_dataloader:
             cfx_new, y_hat_pred = model.forward(X, hard=True)
@@ -71,10 +74,18 @@ def eval_chunk_counternet(model, val_dataloader, epoch):
             assert torch.all((~is_real_cfx) | is_cfx_new).item()
             total_robust += torch.sum(is_real_cfx).item()
 
+            acc_cnt0 += torch.sum(y_hat_hard[y == 0] == y[y == 0]).item()
+            acc_cnt1 += torch.sum(y_hat_hard[y == 1] == y[y == 1]).item()
+            total0 += torch.sum(y == 0).item()
+            total1 += torch.sum(y == 1).item()
+
     print("Epoch", str(epoch), "Test accuracy:", round(acc_cnt / total_samples * 100, 2),
           "Test loss:", round(total_loss / total_samples, 4),
           "Total robust:", round(total_robust / total_samples * 100, 2))
-    return {"test_acc": acc_cnt / total_samples, "test_loss": total_loss / total_samples, "total_robust": total_robust}
+    # print accuracy by class
+    print("acc0: ", acc_cnt0 / total0, "acc1: ", acc_cnt1 / total1)
+    
+    return {"test_acc": acc_cnt / total_samples, "test_loss": total_loss / total_samples, "test_acc0": acc_cnt0 / total0, "test_acc1": acc_cnt1 / total1, "total_robust": total_robust}
 
 
 def eval_train_test_chunk(model, train_dataloader, test_dataloader):
@@ -83,13 +94,20 @@ def eval_train_test_chunk(model, train_dataloader, test_dataloader):
     tasks = ["train_acc_final", "test_acc_final"]
     with torch.no_grad():
         for dataloader, task in zip(dataloaders, tasks):
+            acc0, acc1, total0, total1 = 0, 0, 0, 0
             total_samples, correct = 0, 0
             for X, y, _ in dataloader:
+                total0 += torch.sum(y == 0).item()
+                total1 += torch.sum(y == 1).item()
                 total_samples += len(X)
                 X = X.float()
                 y_pred = model.forward_point_weights_bias(X).argmax(dim=-1)
+                acc0 += torch.sum(y_pred[y == 0] == y[y == 0]).item()
+                acc1 += torch.sum(y_pred[y == 1] == y[y == 1]).item()
                 correct += torch.sum((y_pred == y).float()).item()
             print(f"{task}: ", round(correct / total_samples, 4))
+            print(f"{task} (Acc. for 0)", round(acc0 / total0, 4))
+            print(f"{task} (Acc. for 1)", round(acc1 / total1, 4))
             if args.wandb is not None:
                 args.wandb.summary[task] = round(correct / total_samples, 4)
 
@@ -180,8 +198,8 @@ def train_IBP(train_data, test_data, model: VerifyModel, cfx_method, onehot, fil
             print("Epoch", str(epoch), "train_loss:", total_loss / len(train_data))
 
         wandb_log.update(eval_chunk(model, test_dataloader, val_dataloader, train_dataloader, epoch, cfx_x, is_cfx))
-        if best_val_loss > wandb_log["test_loss"]:
-            best_val_loss = wandb_log["test_loss"]
+        if best_val_loss > wandb_log["validation_loss"]:
+            best_val_loss = wandb_log["validation_loss"]
             best_epoch = epoch
             model.save(filename)
 
@@ -229,6 +247,12 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
             eps_ratio = 1
         wandb_log = {"ratio": ratio}
         model.eval()
+        # change learning rate of optimizer 1
+        for param_group in optimizer_1.param_groups:
+            param_group['lr'] *= args.config["lr_decay"]
+        for param_group in optimizer_2.param_groups:
+            param_group['lr'] *= args.config["lr_decay"]
+
         # model.encoder_net_ori.set_eps_ratio(eps_ratio)
         if epoch % cfx_generation_freq == 0 and (epoch > 0 or args.finetune):
             if not args.inc_regenerate or is_cfx is None:
@@ -383,8 +407,8 @@ def prepare_data_and_model(args):
                         activation=act)
         model = VerifyModel(model_ori, dummy_input_shape=train_data.X[:2].shape, loss_func=args.config["loss_1"])
 
-
-    model.load(os.path.join(args.save_dir, args.model_name))
+    if args.finetune:
+        model.load(os.path.join(args.save_dir, args.model_name))
 
     ret["model"] = model
     return ret
@@ -402,7 +426,7 @@ if __name__ == '__main__':
     parser.add_argument('--wandb', action='store_true', help='whether to log to wandb')
 
     # cfx args
-    parser.add_argument('--cfx', type=str, default="wachter", help="wachter or proto",
+    parser.add_argument('--cfx', type=str, default="counternet", help="wachter or proto or counternet",
                         choices=["wachter", "proto", "counternet"])
     parser.add_argument('--onehot', action='store_true', help='whether to use one-hot encoding')
     parser.add_argument('--proto_theta', type=float, default=100, help='theta for proto')

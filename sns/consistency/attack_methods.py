@@ -39,7 +39,7 @@ class Counterfactual(object):
         x_adv, is_adv = self.generate_counterfactual(x,
                                              batch_size=batch_size,
                                              **kwargs)
-        # Run SNS search
+                # Run SNS search
         if self.sns_fn is not None:
             x_adv = self.sns_fn(x_adv)
 
@@ -47,7 +47,6 @@ class Counterfactual(object):
         pred_adv = np.argmax(self.model.predict(x_adv, batch_size=self.batch_size), -1)
         # 3. check if counterfactual is valid
         is_valid = self.is_valid(pred_adv)
-        print("are is_valid and is_adv equal? (should be)", (is_valid == is_adv).all())
         return x_adv, pred_adv, is_valid
 
     def get_original_prediction(self, x, original_pred_sparse):
@@ -128,7 +127,7 @@ class IterativeSearch(Counterfactual):
         else:
             raise ValueError("norm must be integers (1 or 2)")
 
-        adv_x = adv_x[is_adv]
+        #adv_x = adv_x[is_adv]
 
         return adv_x, is_adv
 

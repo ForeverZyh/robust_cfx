@@ -8,7 +8,7 @@ from models.inn import Node, Interval
 
 
 class VerifyModel(nn.Module):
-    def __init__(self, model, dummy_input_shape, loss_func="mse"):
+    def __init__(self, model, dummy_input_shape, loss_func="mse", loss_weight=None):
         super(VerifyModel, self).__init__()
         self.ori_model = model
         self.dummy_input_shape = dummy_input_shape
@@ -18,7 +18,11 @@ class VerifyModel(nn.Module):
             'sparse_intermediate_bounds_with_ibp': False})
         self.final_node = self.model.final_name
         self.root_nodes = set(self.model.root_names)
-        self.loss_func = get_loss_by_type(loss_func)
+        self.loss_func = get_loss_by_type(loss_func, loss_weight)
+        if loss_weight is None or loss_weight == "none":
+            self.loss_func_cfx = self.loss_func
+        else:
+            self.loss_func_cfx = get_loss_by_type(loss_func, [loss_weight[1], loss_weight[0]])
         self.loss_func_str = loss_func
 
     def forward_point_weights_bias(self, x):
@@ -173,7 +177,14 @@ class VerifyModel(nn.Module):
     def get_loss_ori(self, x, y):
         x = x.float()
         ori_output = self.forward_point_weights_bias(x)
-        ori_output = torch.sigmoid(ori_output[:, 1] - ori_output[:, 0])
+        if type(self.loss_func) == type(nn.MSELoss()):
+            ori_output = torch.sigmoid(ori_output[:, 1] - ori_output[:, 0])
+        elif type(self.loss_func) == type(nn.BCELoss()):
+            # reshape y to have shape (128, 2) instead of (128)
+            ori_output = torch.sigmoid(ori_output)
+            y = torch.stack([torch.abs(1 - y), y], dim=1)
+        else:
+            raise NotImplementedError
         ori_loss = self.loss_func(ori_output, y.float())
         return ori_loss.mean()
 
@@ -207,8 +218,16 @@ class VerifyModel(nn.Module):
         if valid_cfx_only:
             is_real_cfx = is_real_cfx & is_cfx
         cfx_output = torch.sigmoid(cfx_output)
-        cfx_loss = self.loss_func(cfx_output, 1.0 - y_hat)
+        if type(self.loss_func) == type(nn.MSELoss()):
+            cfx_loss = self.loss_func(cfx_output, 1.0 - y_hat)
+            
+        elif type(self.loss_func) == type(nn.BCELoss()):
+            cfx_output = torch.stack([torch.abs(1 - cfx_output), cfx_output], dim=1)
+            y_hat_not = torch.stack([y_hat, 1 - y_hat], dim=1)
+            cfx_loss = self.loss_func_cfx(cfx_output, y_hat_not.float())
+            cfx_loss = cfx_loss.mean(dim=1)
         cfx_loss = torch.where(is_real_cfx, cfx_loss, max_loss)
+        
         return (lambda_ratio * cfx_loss).mean()
 
     def save(self, filename):
@@ -503,13 +522,14 @@ class CounterNet(nn.Module):
         self.encoder_net_ori = EncDec(enc_dims, pred_dims, num_outputs, epsilon_ratio, activation, 0)
         self.dummy_input_shape = (2, enc_dims.in_dim)
         self.loss_1 = config["loss_1"]
-        self.encoder_verify = VerifyModel(self.encoder_net_ori, self.dummy_input_shape, loss_func=self.loss_1)
+        self.loss_1_weight = config["loss_1_weight"]
+        self.encoder_verify = VerifyModel(self.encoder_net_ori, self.dummy_input_shape, loss_func=self.loss_1, loss_weight=config["loss_1_weight"])
         self.explainer = nn.Sequential(
             MultilayerPerception([exp_dims.in_dim] + exp_dims.hidden_dims, 0, activation, dropout),
             nn.Linear(exp_dims.hidden_dims[-1], enc_dims.in_dim))
         self.preprocessor = preprocessor  # for normalization
         self.loss_2 = get_loss_by_type(config["loss_2"])
-        self.loss_3 = get_loss_by_type(config["loss_3"])
+        self.loss_3 = get_loss_by_type(config["loss_3"], config["loss_3_weight"])
         self.lambda_1 = config["lambda_1"]
         self.lambda_2 = config["lambda_2"]
         self.lambda_3 = config["lambda_3"]
@@ -568,8 +588,17 @@ class CounterNet(nn.Module):
         return self.encoder_verify.get_loss_cfx(x, y, cfx, is_cfx, ratio, loss_type)
 
     def get_explainer_loss(self, x, cfx, y_hat, y_prime_hat):  # use y_hat as the ground truth
-        return self.loss_2(x.float(), cfx).mean() * self.lambda_2, \
-               self.loss_3(y_prime_hat, 1.0 - y_hat).mean() * self.lambda_3
+        loss2 = self.loss_2(x.float(), cfx).mean() * self.lambda_2
+        if type(self.loss_3) == type(nn.MSELoss()):
+            loss3 = self.loss_3(y_prime_hat, 1.0 - y_hat).mean() * self.lambda_3
+        elif type(self.loss_3) == type(nn.BCELoss()):
+            y_prime_hat = torch.stack([torch.abs(1 - y_prime_hat), y_prime_hat], dim=1)
+            y_hat = torch.stack([torch.abs(1 - y_hat), y_hat], dim=1)
+            loss3 = self.loss_3(y_prime_hat, 1.0 - y_hat).mean() * self.lambda_3
+        else:
+            raise NotImplementedError
+        return loss2, loss3
+               
 
     def save(self, filename):
         torch.save(self.encoder_net_ori.state_dict(), filename + "_encoder_net_ori.pt")
@@ -578,7 +607,7 @@ class CounterNet(nn.Module):
     def load(self, filename):
         self.encoder_net_ori.load_state_dict(torch.load(filename + "_encoder_net_ori.pt"))
         self.explainer.load_state_dict(torch.load(filename + "_explainer.pt"))
-        self.encoder_verify = VerifyModel(self.encoder_net_ori, self.dummy_input_shape, loss_func=self.loss_1)
+        self.encoder_verify = VerifyModel(self.encoder_net_ori, self.dummy_input_shape, loss_func=self.loss_1, loss_weight=self.loss_1_weight)
 
 
 if __name__ == '__main__':

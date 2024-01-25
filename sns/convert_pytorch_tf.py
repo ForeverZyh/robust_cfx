@@ -56,7 +56,8 @@ if __name__ == "__main__":
     parser.add_argument("dataset")
     parser.add_argument("--save_dir", default="trained_models", help="directory where pytorch model is saved")
     parser.add_argument("--new_model_dir", default="sns/saved_keras_models", help="directory to save keras model to")
-
+    parser.add_argument("--finetune", action='store_true')
+    
     args = parser.parse_args()
 
     if args.dataset == 'german':

@@ -1,8 +1,8 @@
 import tensorflow as tf
-import numpy as np
+# import numpy as np
 
-from auto_LiRPA import BoundedModule, BoundedParameter
-from utils.utilities import seed_everything, FAKE_INF, EPS, FNNDims, get_loss_by_type, get_max_loss_by_type
+# from auto_LiRPA import BoundedModule, BoundedParameter
+# from utils.utilities import seed_everything, FAKE_INF, EPS, FNNDims, get_loss_by_type, get_max_loss_by_type
 
 
 class MultilayerPerception:
@@ -45,17 +45,7 @@ class CounterNet:
         # self.dummy_input_shape = (2, enc_dims.in_dim)
         # self.loss_1 = config["loss_1"]
         self.encoder_verify = None
-        # do not need explainer because we can just use the encoder to predict the explanation
-        # self.explainer = tf.keras.Sequential([
-        #     MultilayerPerception([exp_dims.in_dim] + exp_dims.hidden_dims, 0, activation, dropout),
-        #     layers.Dense(enc_dims.in_dim)
-        # ])
-        # self.preprocessor = preprocessor  # for normalization
-        # self.loss_2 = get_loss_by_type(config["loss_2"])
-        # self.loss_3 = get_loss_by_type(config["loss_3"])
-        # self.lambda_1 = config["lambda_1"]
-        # self.lambda_2 = config["lambda_2"]
-        # self.lambda_3 = config["lambda_3"]
+
 
     def build(self):
         in_x = tf.keras.Input(shape=(self.encoder_net_ori.enc_dims.in_dim,))
