@@ -438,7 +438,7 @@ class Preprocessor:
             x[:, cat_idx: cat_end_idx] = torch.flip(torch.cumsum(torch.flip(tmp_x, dims=[1]), dim=1), dims=[1])
 
         # normalize continuous features of cfx
-        for col in enumerate(self.cont_features):
+        for col in self.cont_features:
             x[:, col] = torch.clamp(x[:, col], 0.0, 1.0)
         return x
 
