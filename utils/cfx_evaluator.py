@@ -56,9 +56,12 @@ class CFXEvaluator:
         # Robustness
         _, cfx_output = self.model_ori.get_diffs_binary(torch.tensor(self.test_data.X).float(), self.cfx_x, pred_y)
         is_real_cfx = torch.where(pred_y == 0, cfx_output > 0, cfx_output < 0) & is_cfx
-        ret += f"Robustness (by our over-approximation): " \
-               f"{round(torch.sum(is_real_cfx).item() / total_valid * 100, 2)}%" \
-               f" ({torch.sum(is_real_cfx).item()}/{total_valid})\n"
+        if total_valid == 0: # no valid CFX
+            ret += "Robustness (by our over-approximation): 0% (0/0)\n"
+        else:
+            ret += f"Robustness (by our over-approximation): " \
+                f"{round(torch.sum(is_real_cfx).item() / total_valid * 100, 2)}%" \
+                f" ({torch.sum(is_real_cfx).item()}/{total_valid})\n"
 
         solver_robust_cnt = 0
         solver_bound_better = 0

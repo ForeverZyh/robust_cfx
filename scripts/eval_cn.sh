@@ -6,22 +6,22 @@ if [ -z "$dataset" ]; then
 fi
 
 modeldir="trained_models"
-logdir="logs"
+logdir="logs/test"
 cfxdir="saved_cfxs"
+
 nummodels=10
 modelcnt=$(($nummodels - 1))
 
 # step 1: generate CFX and compute delta-robustness
 for i in $(seq 0 $modelcnt)
 do
-    echo $i
-    modelname=$dataset"IBP"$i 
+    modelname=$dataset"CN"$i 
     if [ $dataset == "who" ] || [ $dataset == "ctg" ]; then
         python eval.py $modelname $dataset --save_dir $modeldir \
-           --cfx_save_dir $cfxdir --log_save_dir $logdir --skip_milp --finetune
+           --cfx_save_dir $cfxdir --log_save_dir $logdir --skip_milp --cfx_technique "counternet" --finetune
     else 
         python eval.py $modelname $dataset --save_dir $modeldir \
-           --cfx_save_dir $cfxdir --log_save_dir $logdir --skip_milp
+           --cfx_save_dir $cfxdir --log_save_dir $logdir --skip_milp --cfx_technique "counternet"
     fi
 done
 
@@ -31,11 +31,11 @@ python scripts/convert_logs.py --log_dir $logdir --skip_milp --target_datasets $
 # step 3: compute cross-model-validity
 logdir="validity_logs"
 if [ $dataset == "who" ] || [ $dataset == "ctg" ]; then
-    python scripts/cross_model_validity.py $dataset"IBP" $dataset "ours" --save_dir $modeldir \
-          --cfx_save_dir $cfxdir --log_save_dir $logdir --model_cnt $nummodels --finetune
+    python scripts/cross_model_validity.py $dataset"CN" $dataset "counternet" --save_dir $modeldir \
+          --cfx_dir $cfxdir --log_save_dir $logdir --finetune
 else 
-    python scripts/cross_model_validity.py $dataset"IBP" $dataset "ours" --save_dir $modeldir \
-        --cfx_dir $cfxdir --log_save_dir $logdir --model_cnt $nummodels
+    python scripts/cross_model_validity.py $dataset"CN" $dataset "counternet" --save_dir $modeldir \
+        --cfx_dir $cfxdir --log_save_dir $logdir
 fi
 
 # step 4: generate final data

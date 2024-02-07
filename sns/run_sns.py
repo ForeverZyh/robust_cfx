@@ -5,9 +5,6 @@ from consistency import IterativeSearch
 from consistency import PGDsL2
 from consistency import StableNeighborSearch
 
-from sns_utils import load_dataset
-from sns_utils import invalidation
-
 import os
 import argparse
 import pickle
@@ -17,14 +14,10 @@ import models.IBPModel_tf as IBPModel_tf
 from utils.utilities import FNNDims
 from utils.dataset import prepare_data
 
-
 def main(args):
     ret = prepare_data(args)
     X_train = np.array(ret["train_data"].X).astype(np.float32)
-    y_train = np.array(ret["train_data"].y)
     X_test = np.array(ret["test_data"].X).astype(np.float32)
-    y_test = np.array(ret["test_data"].y)
-    preprocessor = ret["preprocessor"]
 
     # set seed 
     tf.random.set_seed(args.seed)
@@ -46,7 +39,7 @@ def main(args):
                                    config=args.config)
 
     model.build()
-    model.load(os.path.join(args.save_dir, args.model_name))
+    model.load(os.path.join(args.save_dir, args.model))
 
     model = model.model
 
@@ -71,6 +64,7 @@ def main(args):
                                          sns_fn=sns_fn)
 
         cf, pred_cf, is_valid = L1_iter_search(X_test[:args.num_to_run])
+
     elif args.technique == 'l2':
         L2_iter_search = IterativeSearch(model,
                                          clamp=[X_train.min(), X_train.max()],
@@ -97,43 +91,38 @@ def main(args):
 
     # check validity by seeing that pred_cf != original preds
     validity = (is_valid & (original_preds != pred_cf)).astype(int)
-    # save cf
-    if not os.path.exists(args.cfx_save_dir):
-        os.makedirs(args.cfx_save_dir)
-
-    cfx_filename = os.path.join(args.cfx_save_dir,
-                                args.model_name[:-1] + "_" + args.technique + "_sns" + args.model_name[-1] + ".npy")
+    # save cfx
+    cfx_filename = os.path.join(args.cfx_save_dir, args.model + "_sns.npy")
     with open(cfx_filename, 'wb') as f:
         pickle.dump((cf, validity), f)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('model_name')
-    parser.add_argument('dataset_name')
+    parser.add_argument('model')
+    parser.add_argument('dataset')
     parser.add_argument('--save_dir', default="sns/saved_keras_models")
     parser.add_argument('--technique', default="l1", choices=['l1', 'l2', 'pgd'],
                         help="how to generate CFX during SNS (l1, l2, pgd)")
     parser.add_argument('--cfx_save_dir', default="sns/saved_cfxs", help="where to save generated cfxs")
-    parser.add_argument('--seed', type=int, default=0, help='random seed')
-    parser.add_argument('--onehot', action='store_true', help='whether to use one-hot encoding')
-    
+    parser.add_argument('--seed', type=int, default=0, help='random seed')    
+    parser.add_argument('--num_to_run', type=int, default=None)
 
     args = parser.parse_args()
 
     args.finetune=False
-    args.model_type = args.model_name.split(args.dataset_name)[0]
+    args.model_type = args.model.split(args.dataset)[0]
 
-    if args.dataset_name == 'ctg':
-        args.num_to_run = 500
-    else:
-        args.num_to_run = 1000
+    if args.num_to_run is None:
+        if args.dataset == 'ctg':
+            args.num_to_run = 500
+        else:
+            args.num_to_run = 1000
 
-    if args.dataset_name == 'german':
-        args.config = 'assets/german_credit.json'
-    else:
-        args.config = 'assets/' + args.dataset_name + '.json'
+    if not os.path.exists(args.cfx_save_dir):
+        os.makedirs(args.cfx_save_dir)
 
+    args.config = f'assets/{args.dataset}.json'
     with open(args.config, 'r') as f:
         args.config = json.load(f)
 

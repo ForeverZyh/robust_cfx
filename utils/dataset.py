@@ -1,14 +1,11 @@
 import copy
 import enum
-from typing import Union, Optional, Dict, Any, List, Callable
 
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-from sklearn.preprocessing import MinMaxScaler
-
+from torch.utils.data import Dataset
 
 # parts copied from https://github.com/junqi-jiang/robust-ce-inn/blob/main/dataset.py
 
@@ -38,30 +35,6 @@ CREDIT_FEAT = {
     10: DataType.DISCRETE,  # other installment plans
     11: DataType.DISCRETE,  # housing
     12: DataType.ORDINAL,  # number of existing credits
-    13: DataType.DISCRETE,  # job
-    14: DataType.DISCRETE,  # number of people being liable
-    15: DataType.DISCRETE,  # telephone
-    16: DataType.DISCRETE,  # foreign worker
-    17: DataType.CONTINUOUS_REAL,  # duration
-    18: DataType.CONTINUOUS_REAL,  # credit amount
-    19: DataType.CONTINUOUS_REAL,  # age
-}
-
-# NOTE marking all ordinal features as discrete because proto can only handle one-hot encoding, not ordinal encoding
-CREDIT_FEAT_PROTO = {
-    0: DataType.DISCRETE,  # checking account status
-    1: DataType.DISCRETE,  # credit history
-    2: DataType.DISCRETE,  # purpose
-    3: DataType.DISCRETE,  # savings
-    4: DataType.DISCRETE,  # employment
-    5: DataType.DISCRETE,  # installment rate # ORDINAL
-    6: DataType.DISCRETE,  # personal status
-    7: DataType.DISCRETE,  # other debtors
-    8: DataType.DISCRETE,  # residence time # ORDINAL
-    9: DataType.DISCRETE,  # property
-    10: DataType.DISCRETE,  # other installment plans
-    11: DataType.DISCRETE,  # housing
-    12: DataType.DISCRETE,  # number of existing credits #ORDINAL
     13: DataType.DISCRETE,  # job
     14: DataType.DISCRETE,  # number of people being liable
     15: DataType.DISCRETE,  # telephone
@@ -201,50 +174,6 @@ WHO_FEAT = {
     16: DataType.CONTINUOUS_REAL,  # income composition of resources
     17: DataType.CONTINUOUS_REAL,  # schooling
 }
-
-ORDINAL_FEATURES_CREDIT = {"installment_rate": 4, "present_residence": 4, "number_credits": 4}
-DISCRETE_FEATURES_CREDIT = {"status": 4, "credit_history": 5, "purpose": 10, "savings": 5, "employment_duration": 5,
-                            "personal_status_sex": 4, "other_debtors": 3, "property": 4, "other_installment_plans": 3,
-                            "housing": 3,
-                            "job": 4, "people_liable": 2, "telephone": 2, "foreign_worker": 2}
-CONTINUOUS_FEATURES_CREDIT = ["duration", "amount", "age"]
-
-# Indicate whether the CREDIT dataset features are mutable.
-# We decided that 
-#   - personal status is immutable (sex is immutable, and 
-#       marital status is technically mutable but not a good recourse)
-#   - age can only be increased
-#   - foreign worker is immutable 
-IMMUTABILITY_CREDIT_FEAT = {
-    0: Immutability.ANY,
-    1: Immutability.ANY,
-    2: Immutability.ANY,
-    3: Immutability.ANY,
-    4: Immutability.ANY,
-    5: Immutability.ANY,
-    6: Immutability.ANY,
-    7: Immutability.ANY,
-    8: Immutability.NONE,
-    9: Immutability.ANY,
-    10: Immutability.ANY,
-    11: Immutability.ANY,
-    12: Immutability.INCREASE,
-    13: Immutability.ANY,
-    14: Immutability.ANY,
-    15: Immutability.ANY,
-    16: Immutability.ANY,
-    17: Immutability.ANY,
-    18: Immutability.ANY,
-    19: Immutability.NONE,
-}
-
-# continuous varialbes must come last
-COLUMNS_CREDIT = ['status', 'credit_history', 'purpose', 'savings', 'employment_duration',
-                  'installment_rate', 'personal_status_sex', 'other_debtors', 'present_residence', 'property',
-                  'other_installment_plans', 'housing', 'number_credits', 'job', 'people_liable', 'telephone',
-                  'foreign_worker', 'duration', 'amount', 'age']
-VALS_PER_FEATURE_CREDIT = [4, 5, 10, 5, 5, 4, 4, 3, 4, 4, 3, 3, 4, 4, 2, 2, 2, 1, 1, 1]
-
 
 class Custom_Dataset(Dataset):
     '''
@@ -451,16 +380,18 @@ class Preprocessor:
             min_vals = self.min_vals
         if max_vals is None:
             max_vals = self.max_vals
+        minmax_arr = []
         for i, name in enumerate(self.cont_features):
             min_val = min_vals[i]
             max_val = max_vals[i]
             df_copy[:, name] = (df_copy[:, name] - min_val) / (max_val - min_val)
 
-        def minmax(x):
-            # reverse the scaling we just did
-            return x * (max_val - min_val) + min_val
+            def minmax(x):
+                # reverse the scaling we just did
+                return x * (max_val - min_val) + min_val
+            minmax_arr.append(minmax)
         
-        return df_copy, minmax
+        return df_copy, minmax_arr
 
     def make_cont_features(self, data, cont_features):
         self.cont_features = [data.feat_var_map[i][0] for i in cont_features]
@@ -470,9 +401,7 @@ class Preprocessor:
 
 def load_data(data, label, feature_types, preprocessor=None):
     '''
-         Load data and preprocess it to be in the correct format for Proto CFX generation
-         Adapted from Jiang et al. Uses a OHE for the data.
-
+         Load data and preprocess it. Adapted from Jiang et al. Uses a OHE for the data.
             :param data: numpy array of shape (num_samples, num_features)
             :param label: numpy array of shape (num_samples, )
             :param feature_types: list of length num_features, each element is a DataType enum
@@ -496,17 +425,6 @@ def load_data(data, label, feature_types, preprocessor=None):
     return data, preprocessor, minmax
 
 
-def load_data_v1(data, data_test, label, feature_types):
-    train_data = Custom_Dataset(data, label, feature_types)
-    test_data = Custom_Dataset(data_test, label, feature_types)
-
-    minmax = MinMaxScaler(clip=True)
-    train_data.X = minmax.fit_transform(train_data.X)
-    test_data.X = minmax.transform(test_data.X)
-
-    return train_data, test_data, minmax
-
-
 def prepare_data(args):
     ret = {"preprocessor": None, "train_data": None, "test_data": None, "model": None, "minmax": None}
     if args.finetune:
@@ -514,19 +432,11 @@ def prepare_data(args):
     else:
         modifier = 'orig'
     if args.config["dataset_name"] == "german_credit":
-        if args.cfx == 'proto':
-            feature_types = CREDIT_FEAT_PROTO
-        else:
-            feature_types = CREDIT_FEAT
-        if args.onehot:
-            train_data, preprocessor, minmax = load_data("data/german_train.csv", "credit_risk", feature_types)
-            test_data, _, _ = load_data("data/german_test.csv", "credit_risk", feature_types, preprocessor)
-            ret["preprocessor"] = preprocessor
-            ret["minmax"] = minmax
-        else:
-            train_data, test_data, minmax = load_data_v1("data/german_train.csv", "data/german_test.csv",
-                                                         "credit_risk", feature_types)
-            ret["minmax"] = minmax
+        feature_types = CREDIT_FEAT
+        train_data, preprocessor, minmax = load_data("data/german_train.csv", "credit_risk", feature_types)
+        test_data, _, _ = load_data("data/german_test.csv", "credit_risk", feature_types, preprocessor)
+        ret["preprocessor"] = preprocessor
+        ret["minmax"] = minmax
     elif args.config["dataset_name"] == "heloc":
         feature_types = HELOC_FEAT
         train_data, preprocessor, minmax = load_data("data/heloc_train.csv", "label", feature_types)
@@ -539,11 +449,6 @@ def prepare_data(args):
         if args.finetune:
             train_data, _ , _ = load_data("data/ctg_shift_train.csv", "label", feature_types, preprocessor)
         test_data, _ , _ = load_data("data/ctg_" + modifier + "_test.csv", "label", feature_types, preprocessor)
-        
-        # RANDOM NOISE VERSION (need to uncomment and/or add more complex flags to use this)
-        # train_data, preprocessor = load_data("data/ctg_train.csv", "label", feature_types)
-        # test_data, _, = load_data("data/ctg_test.csv", "label", feature_types, preprocessor)
-        
         ret['preprocessor'] = preprocessor
         ret['minmax'] = minmax
     elif args.config["dataset_name"] == "student":

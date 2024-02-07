@@ -1,52 +1,21 @@
-import numpy as np
-import torch
-from torch.utils.data import DataLoader, random_split
-import os
-import json
 import argparse
+import json
+import numpy as np
+import os
+import torch
+import wandb
+import warnings
 
+from torch.utils.data import DataLoader, random_split
 import torch.nn.functional as F
 import torch.nn as nn
-import wandb
 
 from utils.dataset import prepare_data
-from utils import cfx
-from models.IBPModel import FNN, VerifyModel, CounterNet, BoundedLinear
+from models.IBPModel import CounterNet
 from utils.utilities import seed_everything, FNNDims
-
-import warnings
 
 # silence ResourceWarning
 warnings.filterwarnings("ignore", category=ResourceWarning)
-
-
-def eval_chunk(model, test_dataloader, val_dataloader, train_dataloader, epoch, cfx_x, is_cfx):
-    model.eval()
-    dataloaders = [val_dataloader, train_dataloader, test_dataloader]
-    tasks = ["validation", "train", "test"]
-    update = {}
-    with torch.no_grad():
-        for dataloader, task in zip(dataloaders, tasks):
-            total_loss, acc_cnt, total_samples = 0, 0, 0
-            for X, y, idx in dataloader:
-                if cfx_x is None:
-                    loss = model.get_loss(X, y, None, None, args.ratio, args.tightness)
-                else:
-                    this_cfx = cfx_x[idx]
-                    this_is_cfx = is_cfx[idx]
-                    loss = model.get_loss(X, y, this_cfx, this_is_cfx, args.ratio, args.tightness)
-                total_loss += loss.item() * len(X)
-                total_samples += len(X)
-                y_pred = model.forward_point_weights_bias(X.float()).argmax(dim=-1)
-                acc_cnt += torch.sum(y_pred == y).item()
-
-            print("Epoch", str(epoch), f"{task} acc: ", acc_cnt / total_samples, "test loss: ",
-                  total_loss / total_samples)
-            
-            update[f"{task}_acc"] = acc_cnt / total_samples
-            update[f"{task}_loss"] = total_loss / total_samples
-    return update
-
 
 def eval_chunk_counternet(model, val_dataloader, epoch):
     model.eval()
@@ -82,8 +51,6 @@ def eval_chunk_counternet(model, val_dataloader, epoch):
     print("Epoch", str(epoch), "Test accuracy:", round(acc_cnt / total_samples * 100, 2),
           "Test loss:", round(total_loss / total_samples, 4),
           "Total robust:", round(total_robust / total_samples * 100, 2))
-    # print accuracy by class
-    print("acc0: ", acc_cnt0 / total0, "acc1: ", acc_cnt1 / total1)
     
     return {"test_acc": acc_cnt / total_samples, "test_loss": total_loss / total_samples, "test_acc0": acc_cnt0 / total0, "test_acc1": acc_cnt1 / total1, "total_robust": total_robust}
 
@@ -106,8 +73,6 @@ def eval_train_test_chunk(model, train_dataloader, test_dataloader):
                 acc1 += torch.sum(y_pred[y == 1] == y[y == 1]).item()
                 correct += torch.sum((y_pred == y).float()).item()
             print(f"{task}: ", round(correct / total_samples, 4))
-            print(f"{task} (Acc. for 0)", round(acc0 / total0, 4))
-            print(f"{task} (Acc. for 1)", round(acc1 / total1, 4))
             if args.wandb is not None:
                 args.wandb.summary[task] = round(correct / total_samples, 4)
 
@@ -128,97 +93,10 @@ def eval_cfx_chunk(model, cfx_dataloader, cfx_x, is_cfx, epoch):
         return {"valid_cfx": post_valid}
 
 
-# TODO add changes to train_IBP to make it consistent with train_IBP_counternet
-def train_IBP(train_data, test_data, model: VerifyModel, cfx_method, onehot, filename):
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.config["weight_decay"])
-    cfx_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=False)  # for CFX test
-
-    @torch.no_grad()
-    def predictor(X: np.ndarray) -> np.ndarray:
-        X = torch.as_tensor(X, dtype=torch.float32)
-        with torch.no_grad():
-            ret = model.forward_point_weights_bias(X)
-            ret = F.softmax(ret, dim=1)
-            ret = ret.cpu().numpy()
-        return ret
-
-    # not sure why we need num_layers here.
-    cfx_generator = cfx.CFX_Generator(predictor, train_data, num_layers=None)
-    ori_train_len = len(train_data)
-
-    val_size = int(ori_train_len // 8)  # 1/8 of the training set is used for validation
-    train_data, val_data = random_split(train_data, [ori_train_len - val_size, val_size])
-    train_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=True)
-    test_dataloader = DataLoader(test_data, batch_size=args.batch_size, shuffle=False)
-    val_dataloader = DataLoader(val_data, batch_size=args.batch_size, shuffle=False)
-
-    cfx_generation_freq = args.cfx_generation_freq
-    max_epochs = args.epoch
-    cfx_x = None
-    is_cfx = None
-    regenerate = np.ones(ori_train_len).astype(bool)
-    best_val_loss = np.inf
-    best_epoch = -1
-    for epoch in range(max_epochs):
-        model.eval()
-        wandb_log = {}
-        if epoch % cfx_generation_freq == 0 and (epoch > 0 or args.finetune):
-            # generate CFX
-            if not args.inc_regenerate:
-                regenerate = np.ones(ori_train_len).astype(bool)
-            if cfx_method == "proto":
-                cfx_x, is_cfx = cfx_generator.run_proto(scaler=None, theta=args.proto_theta, onehot=onehot,
-                                                        CEs=cfx_x, is_CE=is_cfx, regenerate=regenerate)
-            else:
-                cfx_x, is_cfx = cfx_generator.run_wachter(scaler=None, max_iter=args.wachter_max_iter,
-                                                          CEs=cfx_x, is_CE=is_cfx, regenerate=regenerate,
-                                                          lam_init=args.wachter_lam_init,
-                                                          max_lam_steps=args.wachter_max_lam_steps)
-
-        if cfx_x is not None:
-            wandb_log.update(eval_cfx_chunk(model, cfx_dataloader, cfx_x, is_cfx, epoch))
-
-        model.train()
-        total_loss = 0
-        for batch, (X, y, idx) in enumerate(train_dataloader):
-            optimizer.zero_grad()
-            if cfx_x is None:
-                loss = model.get_loss(X, y, None, None, args.ratio, args.tightness)
-            else:
-                this_cfx = cfx_x[idx]
-                this_is_cfx = is_cfx[idx]
-                loss = model.get_loss(X, y, this_cfx, this_is_cfx, args.ratio, args.tightness)
-            total_loss += loss.item() * X.shape[0]
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.config["clip_grad_norm"])
-            optimizer.step()
-
-        # wandb_log.update({"train_loss": total_loss / len(train_data)})
-        if args.wandb is None:
-            print("Epoch", str(epoch), "train_loss:", total_loss / len(train_data))
-
-        wandb_log.update(eval_chunk(model, test_dataloader, val_dataloader, train_dataloader, epoch, cfx_x, is_cfx))
-        if best_val_loss > wandb_log["validation_loss"]:
-            best_val_loss = wandb_log["validation_loss"]
-            best_epoch = epoch
-            model.save(filename)
-
-        if args.wandb is not None:
-            args.wandb.log(wandb_log, commit=True)
-
-    model.load(filename)
-    eval_train_test_chunk(model, train_dataloader, test_dataloader)
-    if args.wandb is not None:
-        args.wandb.summary["best_epoch"] = best_epoch
-    print("best epoch: ", best_epoch)
-    return model
-
-
 def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
     optimizer_1 = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.config["weight_decay"])
     optimizer_2 = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.config["weight_decay"])
-    # optimizer_1 = torch.optim.Adam(model.parameters(), lr=args.lr)
-    # optimizer_2 = torch.optim.Adam(model.parameters(), lr=args.lr)
+
     cfx_dataloader = DataLoader(train_data, batch_size=args.batch_size, shuffle=False)  # for CFX test
     ori_train_len = len(train_data)
     val_size = int(ori_train_len // 8)  # 1/8 of the training set is used for validation
@@ -247,7 +125,7 @@ def train_IBP_counternet(train_data, test_data, model: CounterNet, filename):
             eps_ratio = 1
         wandb_log = {"ratio": ratio}
         model.eval()
-        # change learning rate of optimizer 1
+
         for param_group in optimizer_1.param_groups:
             param_group['lr'] *= args.config["lr_decay"]
         for param_group in optimizer_2.param_groups:
@@ -391,24 +269,16 @@ def prepare_data_and_model(args):
     else:
         raise NotImplementedError("Activation function not implemented")
 
-    if args.cfx.startswith("counternet"):
-        # if dataset contains discrete features, we need to use one-hot encoding for counternet
-        if args.config["dataset_name"] in ["german_credit", "student", "taiwan"]:
-            assert args.onehot, "Counternet should work with onehot"
-        enc_dims = FNNDims(dim_in, args.config["encoder_dims"])
-        pred_dims = FNNDims(None, args.config["decoder_dims"])
-        exp_dims = FNNDims(None, args.config["explainer_dims"])
-        model = CounterNet(enc_dims, pred_dims, exp_dims, 2,
-                           epsilon_ratio=args.config["eps_ratio"],
-                           activation=act, dropout=args.config["dropout"], preprocessor=preprocessor,
-                           config=args.config)
-    else:
-        model_ori = FNN(dim_in, 2, args.config["FNN_dims"], epsilon=args.epsilon, bias_epsilon=args.bias_epsilon,
-                        activation=act)
-        model = VerifyModel(model_ori, dummy_input_shape=train_data.X[:2].shape, loss_func=args.config["loss_1"])
-
+    enc_dims = FNNDims(dim_in, args.config["encoder_dims"])
+    pred_dims = FNNDims(None, args.config["decoder_dims"])
+    exp_dims = FNNDims(None, args.config["explainer_dims"])
+    model = CounterNet(enc_dims, pred_dims, exp_dims, 2,
+                        epsilon_ratio=args.config["eps_ratio"],
+                        activation=act, dropout=args.config["dropout"], preprocessor=preprocessor,
+                        config=args.config)
+    
     if args.finetune:
-        model.load(os.path.join(args.save_dir, args.model_name))
+        model.load(os.path.join(args.save_dir, args.model))
 
     ret["model"] = model
     return ret
@@ -416,32 +286,22 @@ def prepare_data_and_model(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('model_name', type=str,
+    parser.add_argument('model', type=str,
                         help="filename to save the model parameters to (don't include .pt )")
+    parser.add_argument('dataset', type=str)
     parser.add_argument('--save_dir', type=str, default="trained_models", help="directory to save models to")
-    parser.add_argument('--model', type=str, default=None, help='IBP or Standard', choices=['IBP', 'Standard'])
+    parser.add_argument('--model', type=str, default='IBP', help='IBP or CN or Standard', choices=['IBP', 'CN', 'Standard'])
     parser.add_argument('--seed', type=int, default=0, help='random seed')
-    parser.add_argument('--config', type=str, default="assets/german_credit.json",
-                        help='config file for the dataset and the model')
-    parser.add_argument('--wandb', action='store_true', help='whether to log to wandb')
+    parser.add_argument('--config', type=str, default=None,
+                        help='config file for the dataset and the model. If omitted, use assets/dataset.json')
 
-    # cfx args
-    parser.add_argument('--cfx', type=str, default="counternet", help="wachter or proto or counternet",
-                        choices=["wachter", "proto", "counternet"])
-    parser.add_argument('--onehot', action='store_true', help='whether to use one-hot encoding')
-    parser.add_argument('--proto_theta', type=float, default=100, help='theta for proto')
-    parser.add_argument('--wachter_max_iter', type=int, default=100, help='max iter for wachter')
-    parser.add_argument('--wachter_lam_init', type=float, default=1e-3, help='initial lambda for wachter')
-    parser.add_argument('--wachter_max_lam_steps', type=int, default=10, help='max lambda steps for wachter')
+    # training args
+    parser.add_argument('--epoch', type=int, default=50, help='number of epochs to train')
     parser.add_argument('--remove_pct', default=None, type=float, help='percentage of data points to remove for LOO')
     parser.add_argument('--removal_start', type=float, default=0,
                         help='Where to start removal, i.e., if 0 start at x[0]. If 1, start at x[remove_pct*n], etc.')
     parser.add_argument('--finetune', action='store_true', help='whether to finetune the model')
-
-    # training args
-    parser.add_argument('--epoch', type=int, default=50, help='number of epochs to train')
-    # lr has been moved to the config file
-    # parser.add_argument('--lr', type=float, default=0.01, help='learning rate')
+    parser.add_argument('--wandb', action='store_true', help='whether to log to wandb')
 
     # IBP training args
     parser.add_argument('--cfx_generation_freq', type=int, default=20, help='frequency of CFX generation')
@@ -455,24 +315,23 @@ if __name__ == '__main__':
                         help='whether to regenerate CFXs incrementally for those that are no longer CFX each time')
     args = parser.parse_args()
 
-    # If finetuning, no need to warmup
+    if args.config is None:
+        args.config = f"assets/{args.dataset}.json"
+    with open(args.config, 'r') as f:
+        args.config = json.load(f)
+
+    args.lr = args.config["lr"]
     if args.finetune:
+        args.lr /= 5
+        # If finetuning, no need to warmup
         args.warm_up_epoch_pct = 0
         args.linear_scaling_epoch_pct /= 2
     args.fixed_ratio_epoch_pct = 1 - args.linear_scaling_epoch_pct - args.warm_up_epoch_pct
     assert 0 <= args.warm_up_epoch_pct <= 1 and 0 <= args.linear_scaling_epoch_pct <= 1 and \
            0 <= args.fixed_ratio_epoch_pct <= 1
     
-
-    with open(args.config, 'r') as f:
-        args.config = json.load(f)
-    args.lr = args.config["lr"]
-    if args.finetune:
-        args.lr /= 5
-    
-
     if args.wandb:
-        args.wandb = wandb.init(project="robust_cfx", name=args.model_name, config=args.__dict__)
+        args.wandb = wandb.init(project="robust_cfx", name=args.model, config=args.__dict__)
     else:
         args.wandb = None
 
@@ -483,6 +342,13 @@ if __name__ == '__main__':
 
     if args.model == "Standard":
         args.ratio = 0
+        args.cfx_generation_freq = args.epoch + 1
+        args.tightness = "none"
+        args.config["lambda_1"] = 1
+        args.config["lambda_2"] = 0
+        args.config["lambda_3"] = 0
+    elif args.model == "CN":
+        args.ratio = 0
         args.cfx_generation_freq = args.epoch + 1  # never generate cfx
         args.tightness = "none"
     else:
@@ -491,16 +357,12 @@ if __name__ == '__main__':
 
     ret = prepare_data_and_model(args)
 
-    model_filename = os.path.join(args.save_dir, args.model_name)
+    model_filename = os.path.join(args.save_dir, args.model)
     if args.finetune:
         model_filename += "_finetune"
     
-    if args.cfx == "counternet":
-        model = train_IBP_counternet(ret["train_data"], ret["test_data"], ret["model"],
-                                     model_filename)
-    else:
-        model = train_IBP(ret["train_data"], ret["test_data"], ret["model"], args.cfx, args.onehot,
-                          model_filename)
+    model = train_IBP_counternet(ret["train_data"], ret["test_data"], ret["model"],
+                                    model_filename)
 
     if args.wandb is not None:
         args.wandb.finish()

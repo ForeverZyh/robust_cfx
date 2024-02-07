@@ -13,16 +13,6 @@ def main(args):
         if file[0] == ".":
             continue
 
-        if 'e100' in file:
-            epochs = 100
-        else:
-            epochs = 200
-        if 'eps' in file:
-            eps = float(file.split('eps')[1].split('r')[0])
-            r = float(file.split('eps')[1].split('r')[1].split('.csv')[0])
-        else: 
-            eps, r = 0, 0
-
         data = pd.read_csv(os.path.join(args.log_dir, file))
 
         data = np.array(data)
@@ -35,13 +25,13 @@ def main(args):
         training_method = get_training_method(file)
         if training_method == -1:
             continue
-        cfx = get_cfx(file, dataset)
+        cfx = get_cfx(file)
 
-        all_data.append([dataset, training_method, cfx, epochs, eps, r, validity.mean(), validity.std(),
+        all_data.append([dataset, training_method, cfx, validity.mean(), validity.std(),
                          validity_overall.mean(), validity_overall.std()])
         
     all_data = np.array(all_data)
-    columns = ['dataset', 'training_method', 'cfx', 'epochs', 'eps', 'r', 'validity_mean', 'validity_std', 
+    columns = ['dataset', 'training_method', 'cfx', 'validity_mean', 'validity_std', 
                'validity_overall_mean', 'validity_overall_std']
     df = pd.DataFrame(all_data, columns=columns)
     df.to_csv(args.filename, index=False)

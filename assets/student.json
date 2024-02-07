@@ -14,6 +14,7 @@
         100
     ],
     "lr": 0.0002,
+    "lr_decay": 1.0,
     "batch_size": 128,
     "loss_1": "mse",
     "loss_1_weight": "none",
